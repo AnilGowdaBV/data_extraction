@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Acme Careers - Sample Job Board</title>
+  <script type="application/ld+json">
+  [
+    {
+      "@context": "https://schema.org/",
+      "@type": "JobPosting",
+      "title": "Senior Cloud Architect",
+      "hiringOrganization": {
+        "@type": "Organization",
+        "name": "CloudNova Systems",
+        "numberOfEmployees": {
+          "@type": "QuantitativeValue",
+          "value": 450
+        }
+      },
+      "url": "https://example.com/jobs/cloud-architect"
+    }
+  ]
+  </script>
+</head>
+<body>
+  <header>
+    <h1>Open Positions</h1>
+  </header>
+  <main>
+    <div class="job-listings">
+      <!-- Card 1 -->
+      <article class="job-card" data-testid="job-item">
+        <h3 class="job-title"><a href="/jobs/101">Software Engineer</a></h3>
+        <span class="company-name">ABC Technologies</span>
+        <div class="job-meta">
+          <span class="employee-count">250 employees</span>
+          <span class="location">San Francisco, CA</span>
+        </div>
+      </article>
+
+      <!-- Card 2 -->
+      <article class="job-card" data-testid="job-item">
+        <h3 class="job-title"><a href="/jobs/102">Backend Developer</a></h3>
+        <span class="company-name">XYZ Solutions</span>
+        <div class="job-meta">
+          <span class="employee-count">1,250 employees</span>
+          <span class="location">Remote</span>
+        </div>
+      </article>
+
+      <!-- Card 3 -->
+      <article class="job-card" data-testid="job-item">
+        <h3 class="job-title"><a href="/jobs/103">Data Scientist</a></h3>
+        <span class="company-name">Global Data Corp</span>
+        <div class="job-meta">
+          <span class="employee-count">1.2K employees</span>
+          <span class="location">New York, NY</span>
+        </div>
+      </article>
+
+      <!-- Card 4 (Missing employee count) -->
+      <article class="job-card" data-testid="job-item">
+        <h3 class="job-title"><a href="/jobs/104">Product Manager</a></h3>
+        <span class="company-name">Startup Ventures</span>
+        <div class="job-meta">
+          <span class="location">Austin, TX</span>
+        </div>
+      </article>
+
+      <!-- Card 5 (Duplicate of Card 1) -->
+      <article class="job-card" data-testid="job-item">
+        <h3 class="job-title"><a href="/jobs/101">Software Engineer</a></h3>
+        <span class="company-name">ABC Technologies</span>
+        <div class="job-meta">
+          <span class="employee-count">250 employees</span>
+        </div>
+      </article>
+    </div>
+
+    <!-- Pagination -->
+    <nav class="pagination">
+      <a class="prev" href="/jobs?page=0">Previous</a>
+      <span class="current">1</span>
+      <a rel="next" class="next" href="/jobs?page=2">Next &raquo;</a>
+    </nav>
+  </main>
+</body>
+</html>
