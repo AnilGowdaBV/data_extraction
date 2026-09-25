@@ -42,8 +42,8 @@ class ExtractionService:
         self._browser_manager = BrowserManager()
 
     async def initialize(self) -> None:
-        """Initialize shared browser manager."""
-        await self._browser_manager.initialize()
+        """Initialize service state; browser startup is deferred until HTML crawling is needed."""
+        return None
 
     async def shutdown(self) -> None:
         """Clean up all active jobs and browser resources."""

@@ -124,6 +124,7 @@ class JobCrawler:
 
         processed_records: List[ProcessedJobRecord] = []
         unique_companies: Set[str] = set()
+        await self.browser_manager.initialize()
 
         current_url: Optional[str] = clean_url
         page_num = 0
