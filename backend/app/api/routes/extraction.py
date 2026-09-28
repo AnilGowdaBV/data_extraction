@@ -86,7 +86,7 @@ async def stream_progress(job_id: str, request: Request) -> StreamingResponse:
             "current_action": session.stats.current_action,
             "download_url": (
                 f"/api/extraction/download/{session.job_id}"
-                if session.status == ExtractionStatus.COMPLETED
+                if session.excel_path or session.status in (ExtractionStatus.COMPLETED, ExtractionStatus.STOPPED)
                 else None
             ),
             "error": session.error_message,

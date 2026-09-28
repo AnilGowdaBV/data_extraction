@@ -90,7 +90,7 @@ class ExtractionService:
         """Push a progress snapshot to the session SSE queue."""
         download_url = (
             f"/api/extraction/download/{session.job_id}"
-            if session.status == ExtractionStatus.COMPLETED
+            if session.excel_path or session.status in (ExtractionStatus.COMPLETED, ExtractionStatus.STOPPED)
             else None
         )
         recent_items = [
@@ -131,6 +131,8 @@ class ExtractionService:
 
         async def progress_callback(stats: ExtractionStats) -> None:
             session.stats = stats
+            if crawler.processed_records:
+                session.records = crawler.processed_records
             await self._emit_progress(session, stats)
 
         try:
@@ -143,39 +145,48 @@ class ExtractionService:
             )
             session.records = records
 
-            if session.status != ExtractionStatus.STOPPED:
-                session.stats.current_action = "Generating professional Excel file..."
-                await self._emit_progress(session, session.stats)
-
-                # Generate Excel
-                excel_path = ExportService.generate_excel(
-                    job_id=session.job_id,
-                    records=records,
-                    stats=session.stats,
-                    source_url=session.source_url,
-                )
-                session.excel_path = excel_path
-                session.status = ExtractionStatus.COMPLETED
-                session.stats.current_action = "Extraction complete! Excel file ready for download."
-                session.stats.end_time = datetime.now(timezone.utc)
-                await self._emit_progress(session, session.stats)
-                logger.info(
-                    "Job %s completed successfully with %d records",
-                    session.job_id,
-                    len(records),
-                )
-
         except asyncio.CancelledError:
             session.status = ExtractionStatus.STOPPED
-            session.stats.current_action = "Extraction cancelled."
-            await self._emit_progress(session, session.stats)
+            session.stats.current_action = "Extraction stopped by user."
             logger.info("Job %s was cancelled", session.job_id)
         except Exception as e:
             session.status = ExtractionStatus.FAILED
             session.error_message = str(e)
-            session.stats.current_action = f"Extraction failed: {e!s}"
-            await self._emit_progress(session, session.stats)
+            session.stats.current_action = f"Extraction error: {e!s}"
             logger.error("Job %s encountered error: %s", session.job_id, e, exc_info=True)
+        finally:
+            # ALWAYS generate Excel spreadsheet if records were extracted
+            final_records = session.records or (crawler.processed_records if crawler else [])
+            if final_records:
+                try:
+                    session.stats.current_action = f"Generating Excel spreadsheet with {len(final_records)} records..."
+                    await self._emit_progress(session, session.stats)
+
+                    excel_path = ExportService.generate_excel(
+                        job_id=session.job_id,
+                        records=final_records,
+                        stats=session.stats,
+                        source_url=session.source_url,
+                    )
+                    session.excel_path = excel_path
+
+                    if session.status != ExtractionStatus.STOPPED and session.status != ExtractionStatus.FAILED:
+                        session.status = ExtractionStatus.COMPLETED
+                        session.stats.current_action = f"Extraction complete! {len(final_records)} jobs ready for download."
+                    elif session.status == ExtractionStatus.STOPPED:
+                        session.stats.current_action = f"Extraction stopped. Excel sheet with {len(final_records)} jobs ready for download."
+                    
+                    logger.info(
+                        "Excel generated successfully for job %s with %d records at %s",
+                        session.job_id,
+                        len(final_records),
+                        excel_path,
+                    )
+                except Exception as export_err:
+                    logger.error("Failed to generate Excel for job %s: %s", session.job_id, export_err, exc_info=True)
+
+            session.stats.end_time = datetime.now(timezone.utc)
+            await self._emit_progress(session, session.stats)
 
 
 # Global singleton instance

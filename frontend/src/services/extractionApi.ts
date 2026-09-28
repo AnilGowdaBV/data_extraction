@@ -3,13 +3,15 @@ import {
   ExtractionSummary,
   StartExtractionPayload,
 } from '../types/extraction';
+import { API_BASE } from '../config/api';
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || '/api/extraction';
+const EXTRACTION_API = `${API_BASE}/api/extraction`;
+
 
 export async function startExtraction(
   payload: StartExtractionPayload
 ): Promise<{ job_id: string; message: string }> {
-  const res = await fetch(`${API_BASE}/start`, {
+  const res = await fetch(`${EXTRACTION_API}/start`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -26,7 +28,7 @@ export async function startExtraction(
 }
 
 export async function stopExtraction(jobId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/stop/${jobId}`, {
+  const res = await fetch(`${EXTRACTION_API}/stop/${jobId}`, {
     method: 'POST',
   });
   if (!res.ok) {
@@ -35,7 +37,7 @@ export async function stopExtraction(jobId: string): Promise<void> {
 }
 
 export async function getExtractionSummary(jobId: string): Promise<ExtractionSummary> {
-  const res = await fetch(`${API_BASE}/summary/${jobId}`);
+  const res = await fetch(`${EXTRACTION_API}/summary/${jobId}`);
   if (!res.ok) {
     throw new Error('Failed to load extraction summary');
   }
@@ -47,7 +49,7 @@ export function subscribeToProgress(
   onUpdate: (data: ExtractionProgress) => void,
   onError: (err: Error) => void
 ): () => void {
-  const eventSource = new EventSource(`${API_BASE}/progress/${jobId}`);
+  const eventSource = new EventSource(`${EXTRACTION_API}/progress/${jobId}`);
 
   eventSource.onmessage = (event) => {
     try {
@@ -71,3 +73,27 @@ export function subscribeToProgress(
     eventSource.close();
   };
 }
+
+export interface DatabaseStats {
+  total_jobs: number;
+  new_today: number;
+  total_companies: number;
+  sources: {
+    instahyre: number;
+    himalayas: number;
+    other: number;
+  };
+}
+
+export async function getDatabaseStats(): Promise<DatabaseStats> {
+  const res = await fetch(`${API_BASE}/api/database/stats`);
+  if (!res.ok) {
+    throw new Error('Failed to load database stats');
+  }
+  return res.json();
+}
+
+export function getDatabaseExportUrl(source?: string): string {
+  return source ? `${API_BASE}/api/database/export?source=${encodeURIComponent(source)}` : `${API_BASE}/api/database/export`;
+}
+

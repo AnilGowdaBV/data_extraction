@@ -32,7 +32,7 @@ def test_repository_register_new_and_existing() -> None:
         repo = JobRepository(db_path=db_path)
 
         # 1. First run: Insert Job A
-        id1, is_new1 = repo.register_job(
+        id1, is_new1, first_seen1 = repo.register_job(
             company_name="Google",
             job_role="Senior Software Engineer",
             number_of_people=100000,
@@ -41,9 +41,10 @@ def test_repository_register_new_and_existing() -> None:
         )
         assert id1 > 0
         assert is_new1 is True
+        assert first_seen1 is not None
 
         # 2. First run: Insert Job B
-        id2, is_new2 = repo.register_job(
+        id2, is_new2, first_seen2 = repo.register_job(
             company_name="Meta",
             job_role="ML Scientist",
             number_of_people=50000,
@@ -55,7 +56,7 @@ def test_repository_register_new_and_existing() -> None:
         assert id2 != id1
 
         # 3. Second run: Re-insert Job A (Should be detected as EXISTING)
-        id1_repeat, is_new1_repeat = repo.register_job(
+        id1_repeat, is_new1_repeat, first_seen1_repeat = repo.register_job(
             company_name="Google",
             job_role="Senior Software Engineer",
             number_of_people=100000,

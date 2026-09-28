@@ -1,10 +1,13 @@
-"""Repository for managing persistent job records and delta tracking in SQLite."""
+from __future__ import annotations
 
 import hashlib
+from datetime import date, datetime, timezone
 from typing import Optional, Tuple
 
 from backend.app.core.logging import get_logger
 from backend.app.db.database import get_db_connection, init_db
+from backend.app.models.job import ProcessedJobRecord
+from backend.app.utils.date_helpers import iso_str_to_age_label
 
 logger = get_logger(__name__)
 
@@ -127,3 +130,52 @@ class JobRepository:
                 "new_today": new_today,
                 "total_companies": total_companies,
             }
+
+    def get_all_jobs(self, source_website: Optional[str] = None) -> list[ProcessedJobRecord]:
+        """Fetch all stored jobs from the database as ProcessedJobRecords."""
+        today = datetime.now(timezone.utc).date()
+
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            if source_website:
+                cursor.execute(
+                    """
+                    SELECT id, company_name, job_role, number_of_people, job_url, first_seen_at
+                    FROM scraped_jobs
+                    WHERE source_website LIKE ?
+                    ORDER BY id DESC;
+                    """,
+                    (f"%{source_website}%",),
+                )
+            else:
+                cursor.execute(
+                    """
+                    SELECT id, company_name, job_role, number_of_people, job_url, first_seen_at
+                    FROM scraped_jobs
+                    ORDER BY id DESC;
+                    """
+                )
+            rows = cursor.fetchall()
+
+            def _is_new(first_seen_at_str: str) -> bool:
+                """True only if this job was first added today (UTC)."""
+                try:
+                    # SQLite stores as 'YYYY-MM-DD HH:MM:SS' or ISO format
+                    raw = str(first_seen_at_str).strip()
+                    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    return dt.date() == today
+                except Exception:
+                    return False
+
+            return [
+                ProcessedJobRecord(
+                    company_name=row["company_name"],
+                    job_role=row["job_role"],
+                    number_of_people=row["number_of_people"],
+                    job_url=row["job_url"],
+                    is_new=_is_new(row["first_seen_at"]),
+                    db_id=row["id"],
+                    posted_date=iso_str_to_age_label(str(row["first_seen_at"])),
+                )
+                for row in rows
+            ]

@@ -71,6 +71,27 @@ def init_db(db_path: Optional[str] = None) -> None:
             CREATE INDEX IF NOT EXISTS idx_jobs_url ON scraped_jobs(job_url);
             CREATE INDEX IF NOT EXISTS idx_jobs_company ON scraped_jobs(company_name);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON scraped_jobs(first_seen_at);
+
+            CREATE TABLE IF NOT EXISTS job_applications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                contact TEXT NOT NULL,
+                linkedin_url TEXT,
+                resume_filename TEXT,
+                resume_path TEXT,
+                job_role TEXT NOT NULL,
+                company_name TEXT,
+                job_url TEXT,
+                role_category TEXT NOT NULL DEFAULT 'Other',
+                current_salary TEXT,
+                expected_salary TEXT,
+                notice_period TEXT,
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_apps_role_category ON job_applications(role_category);
+            CREATE INDEX IF NOT EXISTS idx_apps_applied_at ON job_applications(applied_at);
             """)
         conn.commit()
     logger.info("Database schema initialized successfully.")
+

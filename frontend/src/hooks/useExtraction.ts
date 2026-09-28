@@ -51,13 +51,13 @@ export function useExtraction() {
               addLog(update.current_action);
             }
 
-            if (update.status === 'completed') {
-              addLog('Extraction complete! Fetching summary and sample records...');
+            if (update.status === 'completed' || update.status === 'stopped') {
+              addLog(`Extraction ${update.status}! Generating summary and Excel sheet...`);
               try {
                 const finalSummary = await getExtractionSummary(res.job_id);
                 setSummary(finalSummary);
               } catch (e) {
-                console.error('Failed to load final summary', e);
+                console.error('Failed to load summary', e);
               }
             } else if (update.status === 'failed') {
               setError(update.error || 'Extraction failed');
@@ -83,10 +83,18 @@ export function useExtraction() {
   const stop = useCallback(async () => {
     if (!jobId) return;
     try {
-      addLog('Sending cancellation request...');
+      addLog('Stopping extraction and finalizing Excel file...');
       await stopExtraction(jobId);
       setStatus('stopped');
-      addLog('Extraction stopped by user.');
+      // Give backend a brief moment to finish generating the Excel workbook if needed
+      setTimeout(async () => {
+        try {
+          const finalSummary = await getExtractionSummary(jobId);
+          setSummary(finalSummary);
+        } catch (e) {
+          console.warn('Summary not ready yet', e);
+        }
+      }, 800);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Error stopping extraction';
       setError(msg);

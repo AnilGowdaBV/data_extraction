@@ -10,6 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from backend.app.api.routes.applications import router as applications_router
+from backend.app.api.routes.database import router as database_router
 from backend.app.api.routes.extraction import router as extraction_router
 from backend.app.core.config import settings
 from backend.app.core.exceptions import ExtractionError
@@ -41,10 +43,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"https://.*\.vercel\.app|http://localhost:\d+|http://127\.0\.0\.1:\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 
 # Global Custom Exception Handler
@@ -63,6 +67,8 @@ async def extraction_error_handler(request: Request, exc: ExtractionError) -> JS
 
 # Register Routers
 app.include_router(extraction_router)
+app.include_router(database_router)
+app.include_router(applications_router)
 
 
 @app.get("/health", tags=["System"])

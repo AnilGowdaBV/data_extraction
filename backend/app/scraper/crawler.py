@@ -2,7 +2,7 @@
 
 import asyncio
 from typing import Callable, Coroutine, List, Optional, Set
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -78,6 +78,7 @@ class JobCrawler:
         self.company_extractor = CompanyExtractor()
         self.visited_urls: Set[str] = set()
         self.stats = ExtractionStats()
+        self.processed_records: List[ProcessedJobRecord] = []
         self._is_stopped = False
 
     def stop(self) -> None:
@@ -102,6 +103,7 @@ class JobCrawler:
         self.deduplicator.reset()
         self.company_extractor.clear()
         self.stats = ExtractionStats()
+        self.processed_records = []
 
         clean_url = UrlDiscoverySecurity.validate_url(start_url)
 
@@ -466,196 +468,245 @@ class JobCrawler:
         on_progress: Optional[Callable[[ExtractionStats], Coroutine[None, None, None]]] = None,
     ) -> List[ProcessedJobRecord]:
         """
-        High-speed public stream extractor for Instahyre job dataset.
-        Segments across company size buckets [1, 2, 3] (Small, Large, Medium)
-        to cleanly retrieve all 13,350+ jobs without hitting Elasticsearch's 10,000-window cutoff.
+        High-speed stream extractor for Instahyre job dataset.
+        Extracts up to 8,063+ active jobs with live rate-limit cooldown management,
+        preserving user filters (industry, company size, functions, locations).
         """
         processed_records: List[ProcessedJobRecord] = []
+        self.processed_records = processed_records
         unique_companies: Set[str] = set()
         page_num = 0
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-        }
 
-        # Check if user specified a specific company_size in start_url
+        user_agents = [
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0",
+        ]
+
+        def get_headers(attempt_idx: int) -> dict[str, str]:
+            ua = user_agents[attempt_idx % len(user_agents)]
+            return {
+                "User-Agent": ua,
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Referer": "https://www.instahyre.com/search-jobs/",
+                "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
+                "Sec-Fetch-Dest": "empty",
+                "Sec-Fetch-Mode": "cors",
+                "Sec-Fetch-Site": "same-origin",
+            }
+
+        # Parse user query params from input URL
         parsed = urlparse(start_url)
         params = parse_qs(parsed.query)
-        user_cs = params.get("company_size", [None])[0]
-        if user_cs and user_cs != "0":
-            company_sizes = [int(user_cs)]
-        else:
-            # 1: Small (~3,877), 2: Large (~7,264), 3: Medium (~2,211) -> 13,352 total
-            company_sizes = [1, 2, 3]
 
-        bucket_labels = {1: "Small", 2: "Large", 3: "Medium"}
-        offsets = {cs: 0 for cs in company_sizes}
-        exhausted = {cs: False for cs in company_sizes}
+        # Build query string forwarding user filters (industry_types, company_size, etc.)
+        query_dict: dict[str, str] = {
+            "isLandingPage": "true",
+            "job_type": "0",
+            "limit": "20",
+        }
 
-        async with httpx.AsyncClient(timeout=25.0, headers=headers) as client:
+        # Forward all user-supplied query filters
+        for k, v in params.items():
+            if k not in ("offset", "limit"):
+                query_dict[k] = v[0] if len(v) == 1 else ",".join(v)
+
+        # Default to industry_types=13 (Software / IT) if neither is set
+        if "industry_types" not in query_dict and "industry_type" not in query_dict:
+            query_dict["industry_types"] = "13"
+        if "company_size" not in query_dict:
+            query_dict["company_size"] = "0"
+
+        offset = 0
+        total_target_jobs: Optional[int] = None
+
+        async with httpx.AsyncClient(timeout=25.0, headers=get_headers(0)) as client:
             while not self._is_stopped and len(processed_records) < max_records:
-                if all(exhausted.values()):
-                    break
+                query_dict["offset"] = str(offset)
+                encoded_params = urlencode(query_dict)
+                api_url = f"https://www.instahyre.com/api/v1/job_search?{encoded_params}"
 
-                for cs in company_sizes:
-                    if self._is_stopped or len(processed_records) >= max_records:
-                        break
-                    if exhausted[cs]:
-                        continue
+                page_num += 1
+                self.stats.pages_processed = page_num
+                target_str = f" of {total_target_jobs}" if total_target_jobs else ""
+                self.stats.current_action = (
+                    f"Streaming Instahyre jobs (Offset {offset}{target_str}, Extracted: {len(processed_records)})..."
+                )
+                if on_progress:
+                    await on_progress(self.stats)
 
-                    offset = offsets[cs]
-                    cs_label = bucket_labels.get(cs, f"Size {cs}")
-                    page_num += 1
-                    self.stats.pages_processed = page_num
-                    self.stats.current_action = f"Streaming Instahyre {cs_label} companies (Offset {offset}, Total: {len(processed_records)} jobs)..."
-                    if on_progress:
-                        await on_progress(self.stats)
+                data = None
+                request_attempt = 0
 
-                    api_url = (
-                        f"https://www.instahyre.com/api/v1/job_search?"
-                        f"company_size={cs}&industry_type={self.INSTAHYRE_INDUSTRY_ID}"
-                        f"&isLandingPage=true&job_type=0&limit=100&offset={offset}"
-                    )
-                    data = None
-                    request_attempt = 0
+                while data is None and not self._is_stopped:
+                    request_attempt += 1
+                    try:
+                        req_headers = get_headers(page_num + request_attempt)
+                        resp = await client.get(api_url, headers=req_headers)
 
-                    # Instahyre rate-limits rapid pagination; wait and retry the same batch.
-                    while data is None and not self._is_stopped:
-                        request_attempt += 1
-                        try:
-                            resp = await client.get(api_url)
-                            if resp.status_code == 200:
-                                data = resp.json()
-                            elif resp.status_code == 429:
-                                try:
-                                    retry_after_seconds = int(resp.headers.get("retry-after", "0"))
-                                except ValueError:
-                                    retry_after_seconds = 0
-                                wait_sec = max(60, retry_after_seconds)
-                                logger.info(
-                                    "Instahyre rate limit hit (429). Pausing for %ds before retrying the same batch...",
-                                    wait_sec,
+                        if resp.status_code == 200:
+                            data = resp.json()
+                        elif resp.status_code == 429:
+                            # Instahyre returns a ~42s rate-limit window when burst limit is hit.
+                            # Countdown politely and resume automatically without losing place!
+                            retry_after_str = resp.headers.get("retry-after", "45")
+                            try:
+                                retry_after = int(retry_after_str)
+                            except ValueError:
+                                retry_after = 45
+
+                            cooldown = max(10, min(retry_after + 2, 60))
+                            logger.info(
+                                "Instahyre rate limit cooldown (%ds) at offset %d. Total extracted so far: %d",
+                                cooldown,
+                                offset,
+                                len(processed_records),
+                            )
+
+                            # Live second-by-second countdown in UI
+                            for remaining in range(cooldown, 0, -2):
+                                if self._is_stopped:
+                                    break
+                                target_str = f" of {total_target_jobs}" if total_target_jobs else ""
+                                self.stats.current_action = (
+                                    f"Instahyre cooldown: resuming in {remaining}s... "
+                                    f"({len(processed_records)}{target_str} extracted)"
                                 )
-                                self.stats.current_action = f"Rate limit pause ({int(wait_sec)}s) before fetching next batch..."
                                 if on_progress:
                                     await on_progress(self.stats)
-                                await asyncio.sleep(wait_sec)
-                            else:
-                                logger.warning(
-                                    "Instahyre API returned status %s at offset %d (bucket %s)",
-                                    resp.status_code,
-                                    offset,
-                                    cs,
-                                )
-                                break
-                        except Exception as req_err:
+                                await asyncio.sleep(2.0)
+
+                        else:
                             logger.warning(
-                                "Instahyre request error at offset %d: %s. Retrying...",
+                                "Instahyre API returned status %s at offset %d",
+                                resp.status_code,
                                 offset,
-                                req_err,
                             )
                             if request_attempt >= 5:
                                 break
                             await asyncio.sleep(2.0)
 
-                    if not data:
-                        exhausted[cs] = True
-                        continue
-
-                    objs = data.get("objects", [])
-                    if not objs:
-                        exhausted[cs] = True
-                        continue
-
-                    self.stats.jobs_discovered += len(objs)
-
-                    for obj in objs:
-                        if self._is_stopped or len(processed_records) >= max_records:
+                    except Exception as req_err:
+                        logger.warning(
+                            "Instahyre request error at offset %d: %s. Retrying...",
+                            offset,
+                            req_err,
+                        )
+                        if request_attempt >= 5:
                             break
+                        await asyncio.sleep(2.0)
 
-                        employer = obj.get("employer") or {}
-                        comp_raw = employer.get("company_name")
-                        role_raw = obj.get("title") or obj.get("candidate_title")
-                        emp_raw = employer.get("employee_count")
-                        job_url = obj.get("public_url")
-                        source_posted_date = next(
-                            (
-                                source_date_to_age_label(obj.get(key))
-                                for key in (
-                                    "posted_at",
-                                    "posted_on",
-                                    "posted_date",
-                                    "published_at",
-                                    "published_on",
-                                    "publish_date",
-                                    "date_posted",
-                                    "created_at",
-                                    "created_on",
-                                    "created_date",
-                                )
-                                if obj.get(key) is not None
-                            ),
-                            None,
-                        )
+                if not data:
+                    logger.info("No further data returned at offset %d. Wrapping up stream.", offset)
+                    break
 
-                        clean_comp = DataCleaner.clean_company_name(comp_raw)
-                        clean_role = DataCleaner.clean_job_role(role_raw)
+                meta = data.get("meta", {})
+                if total_target_jobs is None:
+                    total_target_jobs = meta.get("total_count")
+                    logger.info("Instahyre reported total active jobs: %s", total_target_jobs)
 
-                        if self.deduplicator.is_duplicate(clean_comp, clean_role, job_url):
-                            self.stats.duplicates_removed = self.deduplicator.duplicates_count
-                            continue
+                objs = data.get("objects", [])
+                if not objs:
+                    logger.info("Empty objects array received at offset %d. Dataset fully exhausted.", offset)
+                    break
 
-                        emp_count = (
-                            EmployeeCountExtractor.parse_count(str(emp_raw))
-                            if emp_raw is not None
-                            else "N/A"
-                        )
-                        if emp_count == "N/A":
-                            self.stats.missing_employee_counts += 1
+                self.stats.jobs_discovered += len(objs)
 
-                        if DataValidator.is_valid_record(clean_comp, clean_role, emp_count):
-                            db_id, is_new, first_seen_at = self.repository.register_job(
-                                company_name=clean_comp,
-                                job_role=clean_role,
-                                number_of_people=emp_count,
-                                job_url=job_url,
-                                source_website="instahyre.com",
+                for obj in objs:
+                    if self._is_stopped or len(processed_records) >= max_records:
+                        break
+
+                    employer = obj.get("employer") or {}
+                    comp_raw = employer.get("company_name")
+                    role_raw = obj.get("title") or obj.get("candidate_title")
+                    emp_raw = employer.get("employee_count")
+                    job_url = obj.get("public_url")
+                    source_posted_date = next(
+                        (
+                            source_date_to_age_label(obj.get(key))
+                            for key in (
+                                "posted_at",
+                                "posted_on",
+                                "posted_date",
+                                "published_at",
+                                "published_on",
+                                "publish_date",
+                                "date_posted",
+                                "created_at",
+                                "created_on",
+                                "created_date",
                             )
-                            if is_new:
-                                self.stats.new_jobs_added += 1
-                            else:
-                                self.stats.existing_jobs_seen += 1
+                            if obj.get(key) is not None
+                        ),
+                        None,
+                    )
 
-                            r = ProcessedJobRecord(
-                                company_name=clean_comp,
-                                job_role=clean_role,
-                                number_of_people=emp_count,
-                                job_url=job_url,
-                                is_new=is_new,
-                                db_id=db_id,
-                                posted_date=source_posted_date or iso_str_to_age_label(first_seen_at),
-                            )
-                            processed_records.append(r)
-                            self.stats.jobs_processed = len(processed_records)
-                            self.stats.recent_jobs = [
-                                rec.to_dict() for rec in processed_records[-25:]
-                            ]
+                    clean_comp = DataCleaner.clean_company_name(comp_raw)
+                    clean_role = DataCleaner.clean_job_role(role_raw)
 
-                            norm_comp = DataCleaner.normalize_key(clean_comp)
-                            if norm_comp not in unique_companies:
-                                unique_companies.add(norm_comp)
-                                self.stats.companies_discovered = len(unique_companies)
+                    if self.deduplicator.is_duplicate(clean_comp, clean_role, job_url):
+                        self.stats.duplicates_removed = self.deduplicator.duplicates_count
+                        continue
 
-                    offsets[cs] += len(objs)
-                    if on_progress:
-                        await on_progress(self.stats)
+                    emp_count = (
+                        EmployeeCountExtractor.parse_count(str(emp_raw))
+                        if emp_raw is not None
+                        else "N/A"
+                    )
+                    if emp_count == "N/A":
+                        self.stats.missing_employee_counts += 1
 
-                    # Check if next URL is provided in metadata
-                    meta_next = data.get("meta", {}).get("next")
-                    if not meta_next:
-                        exhausted[cs] = True
+                    if DataValidator.is_valid_record(clean_comp, clean_role, emp_count):
+                        db_id, is_new, first_seen_at = self.repository.register_job(
+                            company_name=clean_comp,
+                            job_role=clean_role,
+                            number_of_people=emp_count,
+                            job_url=job_url,
+                            source_website="instahyre.com",
+                        )
+                        if is_new:
+                            self.stats.new_jobs_added += 1
+                        else:
+                            self.stats.existing_jobs_seen += 1
 
-                    await asyncio.sleep(1.0)
+                        r = ProcessedJobRecord(
+                            company_name=clean_comp,
+                            job_role=clean_role,
+                            number_of_people=emp_count,
+                            job_url=job_url,
+                            is_new=is_new,
+                            db_id=db_id,
+                            posted_date=source_posted_date or iso_str_to_age_label(first_seen_at),
+                        )
+                        processed_records.append(r)
+                        self.processed_records = processed_records
+                        self.stats.jobs_processed = len(processed_records)
+                        self.stats.recent_jobs = [
+                            rec.to_dict() for rec in processed_records[-25:]
+                        ]
+
+                        norm_comp = DataCleaner.normalize_key(clean_comp)
+                        if norm_comp not in unique_companies:
+                            unique_companies.add(norm_comp)
+                            self.stats.companies_discovered = len(unique_companies)
+
+                offset += len(objs)
+                if on_progress:
+                    await on_progress(self.stats)
+
+                # Check if next URL exists in meta
+                meta_next = meta.get("next")
+                if not meta_next:
+                    logger.info("Pagination reached final page (meta.next is None).")
+                    break
+
+                # Pacing between batch requests
+                await asyncio.sleep(0.5)
 
         self.stats.current_action = (
             f"Extraction completed. Total jobs extracted: {len(processed_records)}"
