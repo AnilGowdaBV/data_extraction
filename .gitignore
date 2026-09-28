@@ -52,8 +52,9 @@ test-results/
 # Output Excel & Temp
 *.xlsx
 *.log
-backend/data/*.db
-backend/data/*.db-*
+backend/data/*.db-wal
+backend/data/*.db-shm
+
 scratch/
 temp/
 downloads/
