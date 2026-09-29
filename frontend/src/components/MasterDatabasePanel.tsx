@@ -3,7 +3,9 @@ import {
   Database, RefreshCw, BarChart3,
   Building2, Briefcase, CalendarDays, Sparkles, Globe2,
   CheckCircle2, Loader2, Users, ArrowDownToLine,
-  FileSpreadsheet, Filter, Check
+  FileSpreadsheet, Filter, Check,
+  CheckSquare, Cloud, Layout, Server,
+  Palette, Zap
 } from 'lucide-react';
 
 import { RecentJobsFeed } from './RecentJobsFeed';
@@ -22,6 +24,68 @@ interface MasterDatabasePanelProps {
   refreshTrigger?: number;
   onApplyJob?: (job: PrefillJob) => void;
 }
+
+const CATEGORY_ICON_MAP: Record<string, React.ElementType> = {
+  CheckSquare,
+  Cloud,
+  Layout,
+  Server,
+  BarChart3,
+  Database,
+  Palette,
+  Zap,
+};
+
+const CATEGORY_THEME: Record<string, { bg: string; border: string; text: string; btn: string }> = {
+  qa_automation: {
+    bg: 'bg-emerald-500/10',
+    border: 'border-emerald-500/30',
+    text: 'text-emerald-400',
+    btn: 'from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500',
+  },
+  devops_cloud: {
+    bg: 'bg-sky-500/10',
+    border: 'border-sky-500/30',
+    text: 'text-sky-400',
+    btn: 'from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500',
+  },
+  frontend_mobile: {
+    bg: 'bg-cyan-500/10',
+    border: 'border-cyan-500/30',
+    text: 'text-cyan-400',
+    btn: 'from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500',
+  },
+  backend: {
+    bg: 'bg-indigo-500/10',
+    border: 'border-indigo-500/30',
+    text: 'text-indigo-400',
+    btn: 'from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500',
+  },
+  data_analytics: {
+    bg: 'bg-amber-500/10',
+    border: 'border-amber-500/30',
+    text: 'text-amber-400',
+    btn: 'from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500',
+  },
+  data_engineering: {
+    bg: 'bg-orange-500/10',
+    border: 'border-orange-500/30',
+    text: 'text-orange-400',
+    btn: 'from-orange-600 to-red-600 hover:from-orange-500 hover:to-red-500',
+  },
+  ux_design: {
+    bg: 'bg-purple-500/10',
+    border: 'border-purple-500/30',
+    text: 'text-purple-400',
+    btn: 'from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500',
+  },
+  fde: {
+    bg: 'bg-rose-500/10',
+    border: 'border-rose-500/30',
+    text: 'text-rose-400',
+    btn: 'from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500',
+  },
+};
 
 export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
   refreshTrigger = 0,
@@ -105,8 +169,8 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
       {/* Header row */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-black text-white tracking-tight">Data Archive & Dedicated Workbooks</h2>
-          <p className="text-xs text-slate-500 mt-0.5">Filter-ready Excel workbooks per domain with &lt;100 employees sheets</p>
+          <h2 className="text-xl font-black text-white tracking-tight">Data Archive & Domain Workbooks</h2>
+          <p className="text-xs text-slate-500 mt-0.5">Filter-ready Excel workbooks per domain with separate &lt;100 employees sheets</p>
         </div>
         <button
           onClick={fetchStats} disabled={loading}
@@ -140,10 +204,12 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
 
       {/* ── Category & Domain Dedicated Workbooks Section ── */}
       {categories.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <FileSpreadsheet className="w-5 h-5 text-emerald-400" />
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <FileSpreadsheet className="w-4 h-4" />
+              </div>
               <div>
                 <h3 className="text-sm font-bold text-white">Domain & Keyword Workbooks</h3>
                 <p className="text-[11px] text-slate-400">
@@ -151,57 +217,68 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
                 </p>
               </div>
             </div>
-            <span className="text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-medium">
+            <span className="self-start sm:self-auto text-[11px] px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 font-medium">
               8 Category Workbooks Available
             </span>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {categories.map((cat) => {
               const dlState = dlCat[cat.id] || 'idle';
+              const IconComp = CATEGORY_ICON_MAP[cat.icon] || FileSpreadsheet;
+              const theme = CATEGORY_THEME[cat.id] || CATEGORY_THEME.qa_automation;
+
               return (
                 <div
                   key={cat.id}
-                  className="glass rounded-2xl p-4 border border-slate-800/80 hover:border-indigo-500/30 transition-all flex flex-col justify-between space-y-3.5"
+                  className="glass rounded-2xl p-4 sm:p-5 border border-slate-800/80 hover:border-slate-700 transition-all flex flex-col justify-between space-y-4"
                 >
-                  <div className="space-y-2.5">
-                    {/* Title row */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-slate-800 to-slate-700 flex items-center justify-center border border-slate-700/60 font-mono text-base">
-                          {cat.icon || '📁'}
+                  <div className="space-y-3">
+                    {/* Header: Icon + Title + Counts */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-10 h-10 rounded-xl ${theme.bg} border ${theme.border} ${theme.text} flex items-center justify-center shrink-0 shadow-sm`}>
+                          <IconComp className="w-5 h-5" />
                         </div>
-                        <div>
-                          <h4 className="text-sm font-black text-white">{cat.name}</h4>
-                          <span className="text-[10px] font-mono text-slate-400">{cat.filename}</span>
+                        <div className="min-w-0">
+                          <h4 className="text-sm font-bold text-white tracking-tight truncate">{cat.name}</h4>
+                          <p className="text-[11px] font-mono text-slate-400 truncate">{cat.filename}</p>
                         </div>
                       </div>
 
                       {/* Job Count Badges */}
-                      <div className="flex flex-col items-end gap-1">
-                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded-md bg-indigo-500/15 border border-indigo-500/30 text-indigo-300">
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-200 border border-slate-700/60">
                           {cat.total_jobs.toLocaleString()} jobs
                         </span>
-                        <span className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 flex items-center gap-1">
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                           🌱 &lt;100: {cat.under_100_jobs}
                         </span>
                       </div>
                     </div>
 
-                    {/* Sheet Breakdown Note */}
-                    <div className="text-[11px] text-slate-400 bg-slate-900/60 rounded-lg p-2 border border-slate-800/60 space-y-1">
-                      <div className="flex items-center gap-1.5 text-slate-300 font-medium text-[10px]">
-                        <Filter className="w-3 h-3 text-indigo-400" />
-                        <span>Included Sheets:</span>
+                    {/* Sheet Tabs Preview */}
+                    <div className="bg-slate-900/70 border border-slate-800/80 rounded-xl p-3 space-y-2">
+                      <div className="flex items-center justify-between text-[11px] text-slate-400">
+                        <span className="flex items-center gap-1.5 font-semibold text-slate-300">
+                          <Filter className="w-3.5 h-3.5 text-indigo-400" />
+                          Included Sheets
+                        </span>
+                        <span className="text-[10px] text-emerald-400 font-medium">Includes &lt;100 People Tabs</span>
                       </div>
-                      <div className="flex flex-wrap gap-1 text-[10px]">
-                        <span className="px-1.5 py-0.5 rounded bg-slate-800/90 text-slate-300 border border-slate-700/50">All Jobs</span>
-                        <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 font-semibold">&lt; 100 People (All)</span>
+
+                      <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700/60 text-[10px] font-medium">
+                          All Jobs ({cat.total_jobs})
+                        </span>
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 text-[10px] font-bold">
+                          &lt; 100 People (All) ({cat.under_100_jobs})
+                        </span>
                         {cat.keywords.map(kw => {
                           const kwData = cat.keyword_breakdown?.[kw];
                           const total = kwData ? kwData.total : 0;
                           return (
-                            <span key={kw} className="px-1.5 py-0.5 rounded bg-indigo-950/40 text-indigo-300 border border-indigo-800/40">
+                            <span key={kw} className="px-2 py-0.5 rounded-md bg-indigo-950/40 text-indigo-300 border border-indigo-800/40 text-[10px]">
                               {kw} ({total})
                             </span>
                           );
@@ -210,29 +287,29 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
                     </div>
                   </div>
 
-                  {/* Action Button */}
+                  {/* Download Action Button */}
                   <button
                     onClick={() => downloadCategory(cat)}
                     disabled={dlState === 'loading'}
-                    className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all active:scale-95 ${
+                    className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md ${
                       dlState === 'done'
                         ? 'bg-emerald-500 text-slate-950'
-                        : 'bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white shadow-md'
+                        : `bg-gradient-to-r ${theme.btn} text-white`
                     } ${dlState === 'loading' ? 'opacity-60 cursor-not-allowed' : ''}`}
                   >
                     {dlState === 'loading' ? (
                       <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Building Multi-Tab Excel...</span>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Generating {cat.filename}...</span>
                       </>
                     ) : dlState === 'done' ? (
                       <>
-                        <Check className="w-3.5 h-3.5" />
+                        <Check className="w-4 h-4" />
                         <span>Downloaded {cat.filename}!</span>
                       </>
                     ) : (
                       <>
-                        <ArrowDownToLine className="w-3.5 h-3.5" />
+                        <ArrowDownToLine className="w-4 h-4" />
                         <span>Download {cat.name} ({cat.filename})</span>
                       </>
                     )}
