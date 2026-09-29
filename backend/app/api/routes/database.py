@@ -87,9 +87,12 @@ async def export_master_database(
 
 
 @router.get("/categories")
-async def get_categories_overview() -> list[dict]:
+async def get_categories_overview(
+    source: Optional[str] = Query("himalayas", description="Filter source e.g. himalayas, instahyre, or all"),
+) -> list[dict]:
     """Return overview of all 8 domain categories, keywords, and job counts."""
-    all_jobs = repository.get_all_jobs()
+    src_filter = source if source and source.lower() != "all" else None
+    all_jobs = repository.get_all_jobs(source_website=src_filter)
     results = []
 
     for cat_id, cat_info in CATEGORIES.items():
@@ -118,6 +121,7 @@ async def get_categories_overview() -> list[dict]:
 @router.get("/export/category")
 async def export_category_database(
     category_id: str = Query(..., description="Category ID e.g. qa_automation, devops_cloud"),
+    source: Optional[str] = Query("himalayas", description="Filter source e.g. himalayas, instahyre, or all"),
 ) -> FileResponse:
     """
     Generate and download a multi-tab Excel workbook for a specific domain category.
@@ -135,7 +139,8 @@ async def export_category_database(
             detail=f"Category '{category_id}' not found.",
         )
 
-    all_jobs = repository.get_all_jobs()
+    src_filter = source if source and source.lower() != "all" else None
+    all_jobs = repository.get_all_jobs(source_website=src_filter)
     category_data = filter_jobs_for_category(all_jobs, category_id)
 
     export_dir = os.path.join(tempfile.gettempdir(), "category_database_exports")

@@ -52,7 +52,7 @@ async def test_crawl_himalayas_api_extracts_people_and_date(tmp_path: str) -> No
 
     mock_mcp_response = MagicMock()
     mock_mcp_response.status_code = 200
-    mock_mcp_response.text = 'data: {"result":{"content":[{"type":"text","text":"# micro1\\n\\n**Size:** 501-1000\\n"}]}}\n'
+    mock_mcp_response.text = 'data: {"result":{"content":[{"type":"text","text":"# micro1\\n\\n**Size:** 11-50\\n"}]}}\n'
 
     mock_api_response = MagicMock()
     mock_api_response.status_code = 200
@@ -72,6 +72,6 @@ async def test_crawl_himalayas_api_extracts_people_and_date(tmp_path: str) -> No
         assert len(records) >= 1
         micro1_rec = next((r for r in records if r.company_name == "micro1"), None)
         assert micro1_rec is not None
-        assert micro1_rec.number_of_people == "501-1000"
+        assert micro1_rec.number_of_people == "11-50"
         assert micro1_rec.posted_date != "Unknown"
         assert "ago" in micro1_rec.posted_date or micro1_rec.posted_date == "Today"

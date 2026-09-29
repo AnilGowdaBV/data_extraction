@@ -88,13 +88,19 @@ async def search_roles(
 @router.get("/recent-jobs")
 async def get_recent_jobs(
     limit: int = Query(20, ge=1, le=50, description="Number of recent jobs to return (default: 20)"),
-    source: str = Query("instahyre", description="Filter source, e.g. 'instahyre' or 'all'"),
+    source: str = Query("himalayas", description="Filter source, e.g. 'himalayas', 'instahyre', or 'all'"),
 ) -> dict:
     """
     Returns the most recently scraped jobs from the master database.
-    Defaults to Instahyre source.
+    Defaults to Himalayas source.
     """
-    where_clause = "WHERE source_website LIKE '%instahyre%'" if source.lower() == "instahyre" else ""
+    s_lower = source.lower()
+    if s_lower == "himalayas":
+        where_clause = "WHERE source_website LIKE '%himalayas%'"
+    elif s_lower == "instahyre":
+        where_clause = "WHERE source_website LIKE '%instahyre%'"
+    else:
+        where_clause = ""
 
     with get_db_connection() as conn:
         cursor = conn.cursor()

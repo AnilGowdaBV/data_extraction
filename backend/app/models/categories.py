@@ -7,6 +7,14 @@ from typing import Any, Dict, List, Optional
 from backend.app.models.job import ProcessedJobRecord
 
 
+def is_size_unspecified(value: Any) -> bool:
+    """Check if the employee count is not mentioned / N/A / Unknown."""
+    if value is None:
+        return True
+    s = str(value).strip().lower()
+    return s in ("", "n/a", "unknown", "none", "null", "not specified")
+
+
 def is_under_100_people(value: Any) -> bool:
     """Check if the employee count represents fewer than 100 people."""
     if value is None or str(value).strip() in ("N/A", "Unknown", "", "None"):
@@ -25,6 +33,19 @@ def is_under_100_people(value: Any) -> bool:
     if m_num:
         return int(m_num.group(1)) < 100
     return False
+
+
+def is_eligible_company_size(value: Any) -> bool:
+    """
+    Check if the company size is eligible:
+    - Less than 100 people (< 100)
+    - OR not mentioned / N/A
+    Companies with 100+ employees are NOT eligible.
+    """
+    if is_size_unspecified(value):
+        return True
+    return is_under_100_people(value)
+
 
 
 CATEGORIES: Dict[str, Dict[str, Any]] = {
@@ -143,17 +164,20 @@ def matches_keyword(job_role: str, terms: List[str]) -> bool:
 
 def filter_jobs_for_category(
     all_jobs: List[ProcessedJobRecord], category_id: str
-) -> Dict[str, Dict[str, List[ProcessedJobRecord]]]:
+) -> Dict[str, Any]:
     """
     Given a list of job records and category_id, filter jobs into keyword buckets:
+    Strictly filters out any companies with >=100 employees.
     Returns:
     {
         "all_category_jobs": list,
         "all_under_100": list,
+        "all_unspecified": list,
         "keywords": {
             "Selenium": {
                 "all": [...],
-                "under_100": [...]
+                "under_100": [...],
+                "unspecified": [...]
             },
             ...
         }
@@ -161,7 +185,12 @@ def filter_jobs_for_category(
     """
     cat = CATEGORIES.get(category_id)
     if not cat:
-        return {"all_category_jobs": [], "all_under_100": [], "keywords": {}}
+        return {
+            "all_category_jobs": [],
+            "all_under_100": [],
+            "all_unspecified": [],
+            "keywords": {},
+        }
 
     cat_jobs: List[ProcessedJobRecord] = []
     seen_ids = set()
@@ -172,13 +201,20 @@ def filter_jobs_for_category(
         terms = kw["terms"]
         matched_all = []
         matched_under_100 = []
+        matched_unspecified = []
 
         for j in all_jobs:
+            # Enforce company size filter: Only <100 or N/A
+            if not is_eligible_company_size(j.number_of_people):
+                continue
+
             if matches_keyword(j.job_role, terms):
                 matched_all.append(j)
                 if is_under_100_people(j.number_of_people):
                     matched_under_100.append(j)
-                
+                elif is_size_unspecified(j.number_of_people):
+                    matched_unspecified.append(j)
+
                 job_key = (j.company_name.lower(), j.job_role.lower())
                 if job_key not in seen_ids:
                     seen_ids.add(job_key)
@@ -187,12 +223,16 @@ def filter_jobs_for_category(
         keyword_map[kw_name] = {
             "all": matched_all,
             "under_100": matched_under_100,
+            "unspecified": matched_unspecified,
         }
 
     cat_under_100 = [j for j in cat_jobs if is_under_100_people(j.number_of_people)]
+    cat_unspecified = [j for j in cat_jobs if is_size_unspecified(j.number_of_people)]
 
     return {
         "all_category_jobs": cat_jobs,
         "all_under_100": cat_under_100,
+        "all_unspecified": cat_unspecified,
         "keywords": keyword_map,
     }
+

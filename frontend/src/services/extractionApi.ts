@@ -109,16 +109,16 @@ export interface CategoryOverview {
   keyword_breakdown: Record<string, { total: number; under_100: number }>;
 }
 
-export async function getCategoriesOverview(): Promise<CategoryOverview[]> {
-  const res = await fetch(`${API_BASE}/api/database/categories`);
+export async function getCategoriesOverview(source: string = 'himalayas'): Promise<CategoryOverview[]> {
+  const res = await fetch(`${API_BASE}/api/database/categories?source=${encodeURIComponent(source)}`);
   if (!res.ok) {
     throw new Error('Failed to load categories overview');
   }
   return res.json();
 }
 
-export function getCategoryExportUrl(categoryId: string): string {
-  return `${API_BASE}/api/database/export/category?category_id=${encodeURIComponent(categoryId)}`;
+export function getCategoryExportUrl(categoryId: string, source: string = 'himalayas'): string {
+  return `${API_BASE}/api/database/export/category?category_id=${encodeURIComponent(categoryId)}&source=${encodeURIComponent(source)}`;
 }
 
 

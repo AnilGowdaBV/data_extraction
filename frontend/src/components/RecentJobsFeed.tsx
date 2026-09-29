@@ -88,7 +88,7 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
   const fetchRecentJobs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/applications/recent-jobs?limit=${limit}&source=instahyre`);
+      const res = await fetch(`${API_BASE}/api/applications/recent-jobs?limit=${limit}&source=himalayas`);
       if (res.ok) {
         const data = await res.json();
         setJobs(data.jobs || []);
@@ -144,18 +144,18 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
   return (
     <div className="space-y-4">
       {/* ── Control Header ── */}
-      <div className="glass rounded-2xl p-4 space-y-3 border-indigo-500/20">
+      <div className="glass rounded-2xl p-4 space-y-3 border-sky-500/20">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           {/* Title & Badge */}
           <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-indigo-600 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-500/25">
+            <div className="h-8 w-8 rounded-xl bg-gradient-to-tr from-sky-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-sky-500/25">
               <Zap className="w-4 h-4 text-white" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="text-sm font-extrabold text-white tracking-tight">Recent Scraped Jobs</h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-indigo-500/15 border border-indigo-500/30 text-indigo-300 font-semibold">
-                  Instahyre Live
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-sky-500/15 border border-sky-500/30 text-sky-300 font-semibold">
+                  Himalayas Live
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">

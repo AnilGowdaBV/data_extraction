@@ -15,6 +15,7 @@ from backend.app.db.repository import JobRepository
 from backend.app.extractors.company_extractor import CompanyExtractor
 from backend.app.extractors.employee_extractor import EmployeeCountExtractor
 from backend.app.extractors.job_extractor import JobExtractor
+from backend.app.models.categories import is_eligible_company_size
 from backend.app.models.job import ExtractionStats, ProcessedJobRecord
 from backend.app.processors.cleaner import DataCleaner
 from backend.app.processors.deduplicator import JobDeduplicator
@@ -241,8 +242,8 @@ class JobCrawler:
                         profile_fetcher=fetch_company_profile,
                     )
 
-                if emp_count == "N/A":
-                    self.stats.missing_employee_counts += 1
+                if not is_eligible_company_size(emp_count):
+                    continue
 
                 # Validation
                 if DataValidator.is_valid_record(clean_company, clean_role, emp_count):
@@ -493,8 +494,8 @@ class JobCrawler:
 
                         # Resolve employee count
                         emp_count = company_sizes.get(company_slug) or "N/A"
-                        if emp_count == "N/A":
-                            self.stats.missing_employee_counts += 1
+                        if not is_eligible_company_size(emp_count):
+                            continue
 
                         # Derive accurate Himalayas posted date relative label (e.g. '11 days ago', '1 day ago', '5 days ago')
                         if pub_date_raw:
@@ -752,8 +753,8 @@ class JobCrawler:
                         if emp_raw is not None
                         else "N/A"
                     )
-                    if emp_count == "N/A":
-                        self.stats.missing_employee_counts += 1
+                    if not is_eligible_company_size(emp_count):
+                        continue
 
                     if DataValidator.is_valid_record(clean_comp, clean_role, emp_count):
                         db_id, is_new, first_seen_at = self.repository.register_job(
