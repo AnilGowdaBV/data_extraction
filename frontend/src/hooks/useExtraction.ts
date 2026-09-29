@@ -81,23 +81,28 @@ export function useExtraction() {
   );
 
   const stop = useCallback(async () => {
-    if (!jobId) return;
     try {
       addLog('Stopping extraction and finalizing Excel file...');
-      await stopExtraction(jobId);
+      const targetId = jobId || 'active';
+      try {
+        await stopExtraction(targetId);
+      } catch {
+        try { await stopExtraction('active'); } catch { /* silent */ }
+      }
       setStatus('stopped');
-      // Give backend a brief moment to finish generating the Excel workbook if needed
       setTimeout(async () => {
-        try {
-          const finalSummary = await getExtractionSummary(jobId);
-          setSummary(finalSummary);
-        } catch (e) {
-          console.warn('Summary not ready yet', e);
+        if (jobId) {
+          try {
+            const finalSummary = await getExtractionSummary(jobId);
+            setSummary(finalSummary);
+          } catch (e) {
+            console.warn('Summary not ready yet', e);
+          }
         }
       }, 800);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Error stopping extraction';
-      setError(msg);
+      console.warn('Stop warning:', e);
+      setStatus('stopped');
     }
   }, [jobId, addLog]);
 

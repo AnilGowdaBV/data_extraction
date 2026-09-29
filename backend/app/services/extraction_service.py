@@ -80,9 +80,19 @@ class ExtractionService:
     def stop_extraction(self, job_id: str) -> bool:
         """Signal an active extraction to halt."""
         session = self._sessions.get(job_id)
-        if session and session.crawler:
-            session.crawler.stop()
+        if not session:
+            for s in self._sessions.values():
+                if s.status == ExtractionStatus.RUNNING:
+                    session = s
+                    break
+
+        if session:
             session.status = ExtractionStatus.STOPPED
+            session.stats.current_action = "Extraction stopped by user. Finalizing Excel file..."
+            if session.crawler:
+                session.crawler.stop()
+            if session.task and not session.task.done():
+                session.task.cancel()
             return True
         return False
 

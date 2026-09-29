@@ -422,9 +422,9 @@ class JobCrawler:
                         if not rate_limited:
                             break
 
-                        retry_after = max(
-                            [int(response.headers.get("retry-after", "0")) for response in rate_limited]
-                            + [60]
+                        retry_after = min(
+                            max([int(response.headers.get("retry-after", "0")) for response in rate_limited] + [5]),
+                            15,
                         )
                         logger.warning(
                             "Himalayas rate limit hit. Retrying offsets %d-%d after %ds.",
@@ -437,7 +437,14 @@ class JobCrawler:
                         )
                         if on_progress:
                             await on_progress(self.stats)
-                        await asyncio.sleep(retry_after)
+
+                        for _ in range(int(retry_after * 2)):
+                            if self._is_stopped:
+                                break
+                            await asyncio.sleep(0.5)
+
+                        if self._is_stopped:
+                            break
 
                     raw_jobs = []
                     for page_offset, resp in zip(page_offsets, responses):
