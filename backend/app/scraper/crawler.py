@@ -1,6 +1,8 @@
 """Core crawler orchestrating page traversal, autonomous extraction, and live stats."""
 
 import asyncio
+import json
+import re
 from typing import Callable, Coroutine, List, Optional, Set
 from urllib.parse import parse_qs, urlencode, urlparse
 
@@ -24,6 +26,7 @@ from backend.app.utils.date_helpers import (
     iso_str_to_age_label,
     source_date_to_age_label,
     unix_to_age_label,
+    unix_to_himalayas_age,
 )
 
 logger = get_logger(__name__)
@@ -111,6 +114,7 @@ class JobCrawler:
         if "himalayas.app" in clean_url:
             logger.info("Detected himalayas.app target. Engaging public job stream...")
             return await self._crawl_himalayas_api(
+                start_url=clean_url,
                 max_records=max_records,
                 on_progress=on_progress,
             )
@@ -307,7 +311,8 @@ class JobCrawler:
 
     async def _crawl_himalayas_api(
         self,
-        max_records: int,
+        start_url: str = "",
+        max_records: int = 100000,
         on_progress: Optional[Callable[[ExtractionStats], Coroutine[None, None, None]]] = None,
     ) -> List[ProcessedJobRecord]:
         """Direct stream extractor for Himalayas public job API dataset."""
@@ -317,6 +322,56 @@ class JobCrawler:
         limit = 20
         parallel_pages = 2
         page_num = 0
+
+        if start_url:
+            try:
+                parsed = urlparse(start_url)
+                qs = parse_qs(parsed.query)
+                if "offset" in qs and qs["offset"][0].isdigit():
+                    offset = int(qs["offset"][0])
+                elif "page" in qs and qs["page"][0].isdigit():
+                    p = max(1, int(qs["page"][0]))
+                    offset = (p - 1) * limit
+                    page_num = p - 1
+            except Exception as pe:
+                logger.warning("Error parsing start_url %s: %s", start_url, pe)
+
+        # Preload cached company sizes from database
+        company_sizes: dict[str, str] = self.repository.get_all_company_profiles()
+
+        async def _fetch_company_size_mcp(mcp_client: httpx.AsyncClient, slug: str) -> tuple[str, str]:
+            if not slug:
+                return (slug, "N/A")
+            try:
+                payload = {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "tools/call",
+                    "params": {"name": "get_company_details", "arguments": {"company_slug": slug}},
+                }
+                resp = await mcp_client.post(
+                    "https://mcp.himalayas.app/mcp",
+                    json=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
+                        "User-Agent": "Mozilla/5.0",
+                    },
+                    timeout=8.0,
+                )
+                if resp.status_code == 200:
+                    for line in resp.text.split("\n"):
+                        if line.startswith("data: "):
+                            data = json.loads(line[6:])
+                            text = data.get("result", {}).get("content", [{}])[0].get("text", "")
+                            m = re.search(r"\*\*Size:\*\*\s*([^\n\r]+)", text)
+                            if m:
+                                val = m.group(1).strip()
+                                if val.lower() not in ("not specified", "unknown", "n/a", "none"):
+                                    return (slug, val)
+            except Exception:
+                pass
+            return (slug, "N/A")
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             while not self._is_stopped and len(processed_records) < max_records:
@@ -376,9 +431,26 @@ class JobCrawler:
                         logger.info("No further jobs returned from Himalayas API.")
                         break
 
-                    jobs = [job for job in raw_jobs if self._is_engineering_job(job)]
-
+                    # Extract all cards
+                    jobs = raw_jobs
                     self.stats.jobs_discovered += len(jobs)
+
+                    # Resolve company sizes concurrently for any unseen company slugs
+                    batch_slug_map = {
+                        j.get("companySlug"): j.get("companyName")
+                        for j in jobs
+                        if j.get("companySlug")
+                    }
+                    missing_slugs = [slug for slug in batch_slug_map if slug not in company_sizes]
+                    if missing_slugs:
+                        size_results = await asyncio.gather(*(
+                            _fetch_company_size_mcp(client, slug)
+                            for slug in missing_slugs
+                        ))
+                        for slug, size in size_results:
+                            company_sizes[slug] = size
+                            comp_name = batch_slug_map.get(slug) or slug
+                            self.repository.save_company_employee_count(slug, comp_name, size)
 
                     for j in jobs:
                         if self._is_stopped or len(processed_records) >= max_records:
@@ -388,6 +460,7 @@ class JobCrawler:
                         role_raw = j.get("title")
                         job_url = j.get("applicationLink") or j.get("guid")
                         pub_date_raw = j.get("pubDate")  # Unix timestamp int from Himalayas API
+                        company_slug = j.get("companySlug")
 
                         clean_company = DataCleaner.clean_company_name(company_raw)
                         clean_role = DataCleaner.clean_job_role(role_raw)
@@ -396,13 +469,14 @@ class JobCrawler:
                             self.stats.duplicates_removed = self.deduplicator.duplicates_count
                             continue
 
-                        # Strict N/A when employee count is absent on listing
-                        emp_count = "N/A"
-                        self.stats.missing_employee_counts += 1
+                        # Resolve employee count
+                        emp_count = company_sizes.get(company_slug) or "N/A"
+                        if emp_count == "N/A":
+                            self.stats.missing_employee_counts += 1
 
-                        # Derive posted_date: prefer actual publish timestamp from API
+                        # Derive accurate Himalayas posted date relative label (e.g. '11 days ago', '1 day ago', '5 days ago')
                         if pub_date_raw:
-                            posted_date = unix_to_age_label(int(pub_date_raw))
+                            posted_date = unix_to_himalayas_age(pub_date_raw)
                         else:
                             posted_date = "Unknown"
 
@@ -413,16 +487,13 @@ class JobCrawler:
                                 number_of_people=emp_count,
                                 job_url=job_url,
                                 source_website="himalayas.app",
+                                posted_date=posted_date,
+                                published_at=pub_date_raw,
                             )
                             if is_new:
                                 self.stats.new_jobs_added += 1
                             else:
                                 self.stats.existing_jobs_seen += 1
-
-                            # For existing jobs where we stored a real pub_date, keep it;
-                            # otherwise fall back to our first_seen_at from DB
-                            if posted_date == "Unknown":
-                                posted_date = iso_str_to_age_label(first_seen_at)
 
                             rec = ProcessedJobRecord(
                                 company_name=clean_company,
@@ -434,6 +505,7 @@ class JobCrawler:
                                 posted_date=posted_date,
                             )
                             processed_records.append(rec)
+                            self.processed_records = processed_records
                             self.stats.jobs_processed = len(processed_records)
                             self.stats.recent_jobs = [r.to_dict() for r in processed_records[-25:]]
 
@@ -668,6 +740,7 @@ class JobCrawler:
                             number_of_people=emp_count,
                             job_url=job_url,
                             source_website="instahyre.com",
+                            posted_date=source_posted_date,
                         )
                         if is_new:
                             self.stats.new_jobs_added += 1

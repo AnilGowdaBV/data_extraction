@@ -71,3 +71,36 @@ def test_repository_register_new_and_existing() -> None:
         assert stats["total_jobs"] == 2
         assert stats["total_companies"] == 2
         assert stats["new_today"] == 2
+
+
+def test_repository_himalayas_posted_date_and_company_profiles() -> None:
+    """Verify Himalayas posted_date, published_at, and company_profiles caching."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = os.path.join(temp_dir, "test_jobs.db")
+        repo = JobRepository(db_path=db_path)
+
+        # 1. Save company profile
+        repo.save_company_employee_count("micro1", "micro1", "501-1000")
+        assert repo.get_company_employee_count("micro1") == "501-1000"
+
+        # 2. Register job with real posted date and pubDate
+        job_id, is_new, _ = repo.register_job(
+            company_name="micro1",
+            job_role="Altium Designer Specialist",
+            number_of_people="501-1000",
+            job_url="https://himalayas.app/companies/micro1/jobs/altium-designer-specialist",
+            source_website="himalayas.app",
+            posted_date="3 days ago",
+            published_at=1790652086,
+        )
+        assert is_new is True
+
+        # 3. Retrieve all jobs and verify posted_date and number_of_people
+        jobs = repo.get_all_jobs(source_website="himalayas")
+        assert len(jobs) == 1
+        rec = jobs[0]
+        assert rec.company_name == "micro1"
+        assert rec.number_of_people == "501-1000"
+        assert rec.posted_date != "Unknown"
+        assert "ago" in rec.posted_date or rec.posted_date == "Today"
+

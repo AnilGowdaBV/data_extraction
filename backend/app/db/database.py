@@ -64,13 +64,24 @@ def init_db(db_path: Optional[str] = None) -> None:
                 source_website TEXT,
                 first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                scrape_count INTEGER DEFAULT 1
+                scrape_count INTEGER DEFAULT 1,
+                posted_date TEXT,
+                published_at TIMESTAMP
             );
 
             CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON scraped_jobs(fingerprint);
             CREATE INDEX IF NOT EXISTS idx_jobs_url ON scraped_jobs(job_url);
             CREATE INDEX IF NOT EXISTS idx_jobs_company ON scraped_jobs(company_name);
             CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON scraped_jobs(first_seen_at);
+
+            CREATE TABLE IF NOT EXISTS company_profiles (
+                company_slug TEXT PRIMARY KEY,
+                company_name TEXT,
+                employee_count TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_company_profiles_slug ON company_profiles(company_slug);
+            CREATE INDEX IF NOT EXISTS idx_company_profiles_name ON company_profiles(company_name);
 
             CREATE TABLE IF NOT EXISTS job_applications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +103,16 @@ def init_db(db_path: Optional[str] = None) -> None:
             CREATE INDEX IF NOT EXISTS idx_apps_role_category ON job_applications(role_category);
             CREATE INDEX IF NOT EXISTS idx_apps_applied_at ON job_applications(applied_at);
             """)
+
+        # Auto-migrate existing scraped_jobs table if needed
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(scraped_jobs);")
+        existing_cols = {row["name"] for row in cursor.fetchall()}
+        if "posted_date" not in existing_cols:
+            cursor.execute("ALTER TABLE scraped_jobs ADD COLUMN posted_date TEXT;")
+        if "published_at" not in existing_cols:
+            cursor.execute("ALTER TABLE scraped_jobs ADD COLUMN published_at TIMESTAMP;")
+
         conn.commit()
     logger.info("Database schema initialized successfully.")
 

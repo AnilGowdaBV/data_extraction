@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from datetime import date, datetime, timezone
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from backend.app.core.logging import get_logger
 from backend.app.db.database import get_db_connection, init_db
 from backend.app.models.job import ProcessedJobRecord
-from backend.app.utils.date_helpers import iso_str_to_age_label
+from backend.app.utils.date_helpers import iso_str_to_age_label, iso_to_himalayas_age, unix_to_himalayas_age
 
 logger = get_logger(__name__)
 
@@ -42,6 +43,8 @@ class JobRepository:
         number_of_people: str | int,
         job_url: Optional[str] = None,
         source_website: Optional[str] = None,
+        posted_date: Optional[str] = None,
+        published_at: Optional[Any] = None,
     ) -> Tuple[int, bool, str]:
         """
         Check if the job has been previously recorded:
@@ -70,11 +73,16 @@ class JobRepository:
                     UPDATE scraped_jobs
                     SET last_seen_at = CURRENT_TIMESTAMP,
                         scrape_count = scrape_count + 1,
-                        number_of_people = ?,
-                        job_url = COALESCE(?, job_url)
+                        number_of_people = CASE
+                            WHEN ? != 'N/A' AND ? != '' THEN ?
+                            ELSE number_of_people
+                        END,
+                        job_url = COALESCE(?, job_url),
+                        posted_date = COALESCE(?, posted_date),
+                        published_at = COALESCE(?, published_at)
                     WHERE id = ?;
                     """,
-                    (str_people, job_url, job_id),
+                    (str_people, str_people, str_people, job_url, posted_date, published_at, job_id),
                 )
                 conn.commit()
                 return job_id, False, str(first_seen_at)
@@ -83,9 +91,9 @@ class JobRepository:
                     """
                     INSERT INTO scraped_jobs (
                         fingerprint, job_url, company_name, job_role,
-                        number_of_people, source_website,
+                        number_of_people, source_website, posted_date, published_at,
                         first_seen_at, last_seen_at, scrape_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1);
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1);
                     """,
                     (
                         fingerprint,
@@ -94,6 +102,8 @@ class JobRepository:
                         job_role,
                         str_people,
                         source_website,
+                        posted_date,
+                        published_at,
                     ),
                 )
                 conn.commit()
@@ -104,6 +114,54 @@ class JobRepository:
                 )
                 first_seen_at = cursor.fetchone()["first_seen_at"]
                 return new_id, True, str(first_seen_at)
+
+    def get_company_employee_count(self, company_slug: str) -> Optional[str]:
+        """Fetch cached employee count for a company slug from company_profiles."""
+        if not company_slug:
+            return None
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT employee_count FROM company_profiles WHERE company_slug = ? LIMIT 1;",
+                (company_slug.lower().strip(),),
+            )
+            row = cursor.fetchone()
+            if row and row["employee_count"]:
+                return str(row["employee_count"])
+        return None
+
+    def save_company_employee_count(
+        self, company_slug: str, company_name: str, employee_count: str
+    ) -> None:
+        """Persist or update employee count in company_profiles table."""
+        if not company_slug:
+            return
+        slug = company_slug.lower().strip()
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO company_profiles (company_slug, company_name, employee_count, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(company_slug) DO UPDATE SET
+                    employee_count = excluded.employee_count,
+                    company_name = COALESCE(excluded.company_name, company_profiles.company_name),
+                    updated_at = CURRENT_TIMESTAMP;
+                """,
+                (slug, company_name, str(employee_count)),
+            )
+            conn.commit()
+
+    def get_all_company_profiles(self) -> dict[str, str]:
+        """Return a mapping of company_slug -> employee_count."""
+        with get_db_connection(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT company_slug, employee_count FROM company_profiles;")
+            return {
+                row["company_slug"]: row["employee_count"]
+                for row in cursor.fetchall()
+                if row["employee_count"]
+            }
 
     def get_stats(self) -> dict:
         """Return high-level database metrics."""
@@ -134,27 +192,22 @@ class JobRepository:
     def get_all_jobs(self, source_website: Optional[str] = None) -> list[ProcessedJobRecord]:
         """Fetch all stored jobs from the database as ProcessedJobRecords."""
         today = datetime.now(timezone.utc).date()
+        company_profiles = self.get_all_company_profiles()
 
         with get_db_connection(self.db_path) as conn:
             cursor = conn.cursor()
+            query = """
+                SELECT id, company_name, job_role, number_of_people, job_url, first_seen_at,
+                       posted_date, published_at
+                FROM scraped_jobs
+            """
+            params: list[Any] = []
             if source_website:
-                cursor.execute(
-                    """
-                    SELECT id, company_name, job_role, number_of_people, job_url, first_seen_at
-                    FROM scraped_jobs
-                    WHERE source_website LIKE ?
-                    ORDER BY id DESC;
-                    """,
-                    (f"%{source_website}%",),
-                )
-            else:
-                cursor.execute(
-                    """
-                    SELECT id, company_name, job_role, number_of_people, job_url, first_seen_at
-                    FROM scraped_jobs
-                    ORDER BY id DESC;
-                    """
-                )
+                query += " WHERE source_website LIKE ?"
+                params.append(f"%{source_website}%")
+            query += " ORDER BY id DESC;"
+
+            cursor.execute(query, params)
             rows = cursor.fetchall()
 
             def _is_new(first_seen_at_str: str) -> bool:
@@ -167,15 +220,48 @@ class JobRepository:
                 except Exception:
                     return False
 
-            return [
-                ProcessedJobRecord(
-                    company_name=row["company_name"],
-                    job_role=row["job_role"],
-                    number_of_people=row["number_of_people"],
-                    job_url=row["job_url"],
-                    is_new=_is_new(row["first_seen_at"]),
-                    db_id=row["id"],
-                    posted_date=iso_str_to_age_label(str(row["first_seen_at"])),
+            records = []
+            for row in rows:
+                emp_count = row["number_of_people"]
+                url = row["job_url"] or ""
+
+                # If employee count is N/A or empty, check company_profiles cache
+                if str(emp_count).strip() in ("N/A", "", "None"):
+                    slug = None
+                    if "/companies/" in url:
+                        m = re.search(r"/companies/([^/]+)", url)
+                        if m:
+                            slug = m.group(1).lower().strip()
+                    if slug and slug in company_profiles:
+                        emp_count = company_profiles[slug]
+                    elif row["company_name"]:
+                        alt_slug = re.sub(r"[^a-z0-9]+", "-", row["company_name"].lower()).strip("-")
+                        if alt_slug in company_profiles:
+                            emp_count = company_profiles[alt_slug]
+
+                # Determine accurate posted_date
+                pub_at = row["published_at"]
+                raw_posted = row["posted_date"]
+                if pub_at:
+                    if str(pub_at).isdigit() or isinstance(pub_at, (int, float)):
+                        p_date = unix_to_himalayas_age(float(pub_at))
+                    else:
+                        p_date = iso_to_himalayas_age(str(pub_at))
+                elif raw_posted and str(raw_posted).strip() not in ("Unknown", "N/A", ""):
+                    p_date = str(raw_posted)
+                else:
+                    # Fallback to first_seen_at using accurate relative days
+                    p_date = iso_to_himalayas_age(str(row["first_seen_at"]))
+
+                records.append(
+                    ProcessedJobRecord(
+                        company_name=row["company_name"],
+                        job_role=row["job_role"],
+                        number_of_people=emp_count if emp_count else "N/A",
+                        job_url=row["job_url"],
+                        is_new=_is_new(row["first_seen_at"]),
+                        db_id=row["id"],
+                        posted_date=p_date,
+                    )
                 )
-                for row in rows
-            ]
+            return records

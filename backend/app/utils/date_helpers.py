@@ -81,6 +81,64 @@ def source_date_to_age_label(value: Any) -> str | None:
     return None
 
 
+def unix_to_himalayas_age(unix_ts: int | float) -> str:
+    """
+    Format a Unix timestamp (seconds or milliseconds) to Himalayas-style relative age string:
+    'Just now', '1 hour ago', '4 hours ago', '1 day ago', '3 days ago', '11 days ago', '1 month ago', '2 months ago'.
+    """
+    now = datetime.now(timezone.utc)
+    try:
+        ts = float(unix_ts)
+        if ts > 100_000_000_000:
+            ts /= 1000
+        posted = datetime.fromtimestamp(ts, tz=timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return "Unknown"
+
+    total_seconds = max(0, (now - posted).total_seconds())
+    days = (now.date() - posted.date()).days
+    hours = int(total_seconds // 3600)
+
+    if days == 0:
+        if hours < 1:
+            return "Today"
+        elif hours == 1:
+            return "1 hour ago"
+        else:
+            return f"{hours} hours ago"
+    elif days == 1:
+        return "1 day ago"
+    elif days < 30:
+        return f"{days} days ago"
+    elif days < 60:
+        return "1 month ago"
+    else:
+        months = max(1, days // 30)
+        return f"{months} months ago"
+
+
+def iso_to_himalayas_age(iso_str: str) -> str:
+    """Parse an ISO 8601 date string and return a Himalayas-style relative age label."""
+    if not iso_str:
+        return "Unknown"
+    try:
+        clean = iso_str.replace("Z", "+00:00")
+        dt = datetime.fromisoformat(clean)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return unix_to_himalayas_age(dt.timestamp())
+    except (ValueError, TypeError):
+        return "Unknown"
+
+
+def datetime_to_himalayas_age(dt: datetime) -> str:
+    """Convert a datetime object to a Himalayas-style relative age label."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return unix_to_himalayas_age(dt.timestamp())
+
+
 def extraction_age_label() -> str:
     """Return the age label for the current extraction time."""
     return datetime_to_age_label(datetime.now(timezone.utc))
+
