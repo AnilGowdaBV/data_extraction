@@ -344,3 +344,128 @@ class ExcelExporter:
         except Exception as e:
             logger.error("Failed to generate Excel file: %s", e)
             raise ExcelExportError(f"Failed to generate Excel file: {e!s}") from e
+
+    @classmethod
+    def export_category_workbook(
+        cls,
+        category_meta: dict,
+        category_data: dict,
+        output_path: str,
+    ) -> str:
+        """
+        Build and save a multi-tab category Excel workbook containing:
+        - Sheet 1: "All <Category> Jobs"
+        - Sheet 2: "<100 People (All)" (all category jobs from companies with <100 employees)
+        - Dedicated tabs for each keyword:
+            - "<Keyword>" (all jobs for this keyword)
+            - "<Keyword> (<100)" (jobs for this keyword from companies with <100 employees)
+        - Sheet Final: "Summary"
+        """
+        try:
+            wb = openpyxl.Workbook()
+            cat_name = category_meta.get("name", "Category")
+            all_cat_jobs = category_data.get("all_category_jobs", [])
+            all_under_100 = category_data.get("all_under_100", [])
+            keywords_map = category_data.get("keywords", {})
+
+            def _safe_sheet_title(raw: str) -> str:
+                clean = re.sub(r"[\\/*?:\[\]]", "_", raw).strip()
+                return clean[:31]
+
+            # ---------------------------------------------------------
+            # Sheet 1: All Category Jobs
+            # ---------------------------------------------------------
+            ws_all = wb.active
+            ws_all.title = _safe_sheet_title(f"All {cat_name} Jobs")
+            cls._populate_jobs_sheet(
+                ws_all,
+                all_cat_jobs,
+                table_name=f"Table_All_{category_meta.get('id', 'cat')}",
+                empty_message=f"No jobs recorded yet for {cat_name}.",
+            )
+
+            # ---------------------------------------------------------
+            # Sheet 2: Under 100 People (All in category)
+            # ---------------------------------------------------------
+            ws_u100 = wb.create_sheet(title=_safe_sheet_title("< 100 People (All)"))
+            cls._populate_jobs_sheet(
+                ws_u100,
+                all_under_100,
+                table_name=f"Table_U100_{category_meta.get('id', 'cat')}",
+                empty_message="No jobs found from companies with fewer than 100 people.",
+            )
+
+            # ---------------------------------------------------------
+            # Keyword Tabs: Each keyword gets [Keyword] and [Keyword (<100)]
+            # ---------------------------------------------------------
+            tbl_counter = 1
+            for kw_name, kw_dict in keywords_map.items():
+                kw_all = kw_dict.get("all", [])
+                kw_u100 = kw_dict.get("under_100", [])
+
+                # Main keyword tab
+                ws_kw = wb.create_sheet(title=_safe_sheet_title(kw_name))
+                cls._populate_jobs_sheet(
+                    ws_kw,
+                    kw_all,
+                    table_name=f"Tbl_KW_{tbl_counter}",
+                    empty_message=f"No {kw_name} jobs extracted yet.",
+                )
+                tbl_counter += 1
+
+                # Keyword <100 people tab
+                ws_kw_u100 = wb.create_sheet(title=_safe_sheet_title(f"{kw_name} (<100)"))
+                cls._populate_jobs_sheet(
+                    ws_kw_u100,
+                    kw_u100,
+                    table_name=f"Tbl_KW_U100_{tbl_counter}",
+                    empty_message=f"No {kw_name} jobs with company size under 100 people.",
+                )
+                tbl_counter += 1
+
+            # ---------------------------------------------------------
+            # Final Sheet: Summary & Statistics
+            # ---------------------------------------------------------
+            ws_summary = wb.create_sheet(title="Summary")
+            ws_summary.views.sheetView[0].showGridLines = True
+
+            ws_summary["A1"] = f"{cat_name} - Extraction Summary"
+            ws_summary["A1"].font = cls.SUMMARY_TITLE_FONT
+
+            summary_rows = [
+                ("Total Jobs in Category", len(all_cat_jobs)),
+                ("Jobs with <100 Employees", len(all_under_100)),
+            ]
+            for kw_name, kw_dict in keywords_map.items():
+                total_k = len(kw_dict.get("all", []))
+                u100_k = len(kw_dict.get("under_100", []))
+                summary_rows.append((f"{kw_name} (Total)", total_k))
+                summary_rows.append((f"{kw_name} (<100 People)", u100_k))
+
+            for r_idx, (k, v) in enumerate(summary_rows, start=3):
+                ws_summary.append([k, v])
+                ws_summary.row_dimensions[r_idx].height = 20
+
+                c1 = ws_summary.cell(row=r_idx, column=1)
+                c1.font = cls.SUMMARY_KEY_FONT
+                c1.border = cls.THIN_BORDER
+                c1.fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+                c2 = ws_summary.cell(row=r_idx, column=2)
+                c2.font = cls.DATA_FONT
+                c2.border = cls.THIN_BORDER
+                c2.alignment = Alignment(horizontal="right", vertical="center")
+                c2.number_format = "#,##0"
+
+            ws_summary.column_dimensions["A"].width = 36
+            ws_summary.column_dimensions["B"].width = 24
+
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+            wb.save(output_path)
+            logger.info("Successfully exported category %s to %s", cat_name, output_path)
+            return os.path.abspath(output_path)
+
+        except Exception as e:
+            logger.error("Failed to generate category Excel file: %s", e)
+            raise ExcelExportError(f"Failed to generate category Excel file: {e!s}") from e
+

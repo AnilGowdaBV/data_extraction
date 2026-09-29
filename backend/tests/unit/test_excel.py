@@ -89,3 +89,87 @@ def test_excel_export_structure() -> None:
         exist_row1 = [ws_existing.cell(row=2, column=col).value for col in range(1, 6)]
         assert exist_row1[0] == "XYZ Solutions"
         assert exist_row1[4] == "EXISTING"
+
+
+def test_export_category_workbook() -> None:
+    category_meta = {
+        "id": "qa_automation",
+        "name": "QA & Automation",
+        "filename": "QA_Automation_Jobs.xlsx",
+        "keywords": ["Selenium", "Playwright"],
+    }
+
+    rec_selenium_small = ProcessedJobRecord(
+        company_name="Alpha QA",
+        job_role="Senior Selenium Engineer",
+        number_of_people="10 - 50 employees",
+        is_new=True,
+    )
+    rec_selenium_big = ProcessedJobRecord(
+        company_name="MegaCorp",
+        job_role="Lead Selenium SDET",
+        number_of_people="500 - 1000 employees",
+        is_new=False,
+    )
+    rec_playwright_small = ProcessedJobRecord(
+        company_name="Beta Labs",
+        job_role="Playwright Automation Engineer",
+        number_of_people="1 - 10 employees",
+        is_new=True,
+    )
+
+    category_data = {
+        "all_category_jobs": [rec_selenium_small, rec_selenium_big, rec_playwright_small],
+        "all_under_100": [rec_selenium_small, rec_playwright_small],
+        "keywords": {
+            "Selenium": {
+                "all": [rec_selenium_small, rec_selenium_big],
+                "under_100": [rec_selenium_small],
+            },
+            "Playwright": {
+                "all": [rec_playwright_small],
+                "under_100": [rec_playwright_small],
+            },
+        },
+    }
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        output_file = os.path.join(temp_dir, "QA_Automation_Jobs.xlsx")
+        result_path = ExcelExporter.export_category_workbook(
+            category_meta=category_meta,
+            category_data=category_data,
+            output_path=output_file,
+        )
+
+        assert os.path.exists(result_path)
+        wb = openpyxl.load_workbook(result_path)
+
+        # Expected sheet names:
+        # 1. All QA & Automation Jobs
+        # 2. < 100 People (All)
+        # 3. Selenium
+        # 4. Selenium (<100)
+        # 5. Playwright
+        # 6. Playwright (<100)
+        # 7. Summary
+        assert "All QA & Automation Jobs" in wb.sheetnames
+        assert "< 100 People (All)" in wb.sheetnames
+        assert "Selenium" in wb.sheetnames
+        assert "Selenium (<100)" in wb.sheetnames
+        assert "Playwright" in wb.sheetnames
+        assert "Playwright (<100)" in wb.sheetnames
+        assert "Summary" in wb.sheetnames
+
+        # Verify < 100 People (All) has only small companies
+        ws_u100 = wb["< 100 People (All)"]
+        assert ws_u100.max_row == 3  # Header + 2 jobs
+        u100_companies = [ws_u100.cell(row=r, column=1).value for r in range(2, 4)]
+        assert "Alpha QA" in u100_companies
+        assert "Beta Labs" in u100_companies
+        assert "MegaCorp" not in u100_companies
+
+        # Verify Selenium (<100) sheet has 1 job
+        ws_sel_u100 = wb["Selenium (<100)"]
+        assert ws_sel_u100.max_row == 2  # Header + 1 job
+        assert ws_sel_u100.cell(row=2, column=1).value == "Alpha QA"
+

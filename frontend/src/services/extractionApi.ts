@@ -97,3 +97,28 @@ export function getDatabaseExportUrl(source?: string): string {
   return source ? `${API_BASE}/api/database/export?source=${encodeURIComponent(source)}` : `${API_BASE}/api/database/export`;
 }
 
+export interface CategoryOverview {
+  id: string;
+  name: string;
+  filename: string;
+  icon: string;
+  color: string;
+  keywords: string[];
+  total_jobs: number;
+  under_100_jobs: number;
+  keyword_breakdown: Record<string, { total: number; under_100: number }>;
+}
+
+export async function getCategoriesOverview(): Promise<CategoryOverview[]> {
+  const res = await fetch(`${API_BASE}/api/database/categories`);
+  if (!res.ok) {
+    throw new Error('Failed to load categories overview');
+  }
+  return res.json();
+}
+
+export function getCategoryExportUrl(categoryId: string): string {
+  return `${API_BASE}/api/database/export/category?category_id=${encodeURIComponent(categoryId)}`;
+}
+
+

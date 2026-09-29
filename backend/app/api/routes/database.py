@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from backend.app.core.logging import get_logger
 from backend.app.db.repository import JobRepository
 from backend.app.exporters.excel import ExcelExporter
+from backend.app.models.categories import CATEGORIES, filter_jobs_for_category
 from backend.app.models.job import ExtractionStats
 
 logger = get_logger(__name__)
@@ -83,3 +84,75 @@ async def export_master_database(
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+@router.get("/categories")
+async def get_categories_overview() -> list[dict]:
+    """Return overview of all 8 domain categories, keywords, and job counts."""
+    all_jobs = repository.get_all_jobs()
+    results = []
+
+    for cat_id, cat_info in CATEGORIES.items():
+        filtered = filter_jobs_for_category(all_jobs, cat_id)
+        results.append({
+            "id": cat_id,
+            "name": cat_info["name"],
+            "filename": cat_info["filename"],
+            "icon": cat_info["icon"],
+            "color": cat_info["color"],
+            "keywords": [kw["name"] for kw in cat_info["keywords"]],
+            "total_jobs": len(filtered["all_category_jobs"]),
+            "under_100_jobs": len(filtered["all_under_100"]),
+            "keyword_breakdown": {
+                kw_name: {
+                    "total": len(data["all"]),
+                    "under_100": len(data["under_100"]),
+                }
+                for kw_name, data in filtered["keywords"].items()
+            },
+        })
+
+    return results
+
+
+@router.get("/export/category")
+async def export_category_database(
+    category_id: str = Query(..., description="Category ID e.g. qa_automation, devops_cloud"),
+) -> FileResponse:
+    """
+    Generate and download a multi-tab Excel workbook for a specific domain category.
+    Includes:
+    - Tab 1: All Category Jobs
+    - Tab 2: Under 100 People (All in category)
+    - Dedicated tabs for each keyword (e.g. Selenium, Playwright, Cypress)
+    - Dedicated tabs for each keyword under 100 people (e.g. Selenium (<100))
+    - Summary Tab
+    """
+    cat_info = CATEGORIES.get(category_id)
+    if not cat_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Category '{category_id}' not found.",
+        )
+
+    all_jobs = repository.get_all_jobs()
+    category_data = filter_jobs_for_category(all_jobs, category_id)
+
+    export_dir = os.path.join(tempfile.gettempdir(), "category_database_exports")
+    os.makedirs(export_dir, exist_ok=True)
+
+    filename = cat_info["filename"]
+    output_path = os.path.join(export_dir, filename)
+
+    ExcelExporter.export_category_workbook(
+        category_meta=cat_info,
+        category_data=category_data,
+        output_path=output_path,
+    )
+
+    return FileResponse(
+        path=output_path,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+

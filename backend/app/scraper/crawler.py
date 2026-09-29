@@ -4,7 +4,7 @@ import asyncio
 import json
 import re
 from typing import Callable, Coroutine, List, Optional, Set
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -323,6 +323,7 @@ class JobCrawler:
         parallel_pages = 2
         page_num = 0
 
+        search_query: Optional[str] = None
         if start_url:
             try:
                 parsed = urlparse(start_url)
@@ -333,6 +334,20 @@ class JobCrawler:
                     p = max(1, int(qs["page"][0]))
                     offset = (p - 1) * limit
                     page_num = p - 1
+
+                # Detect keyword search from query params or URL subpath
+                if "q" in qs and qs["q"][0]:
+                    search_query = qs["q"][0].strip()
+                elif "aiq" in qs and qs["aiq"][0]:
+                    search_query = qs["aiq"][0].strip()
+                elif "query" in qs and qs["query"][0]:
+                    search_query = qs["query"][0].strip()
+                else:
+                    path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+                    if len(path_parts) >= 2 and path_parts[0] == "jobs":
+                        sub = path_parts[1].lower()
+                        if sub not in ("api", "search", "all"):
+                            search_query = sub.replace("-", " ")
             except Exception as pe:
                 logger.warning("Error parsing start_url %s: %s", start_url, pe)
 
@@ -373,23 +388,30 @@ class JobCrawler:
                 pass
             return (slug, "N/A")
 
+        target_desc = f"'{search_query}' jobs" if search_query else "jobs"
+
         async with httpx.AsyncClient(timeout=20.0) as client:
             while not self._is_stopped and len(processed_records) < max_records:
                 page_offsets = [offset + (index * limit) for index in range(parallel_pages)]
                 page_num += len(page_offsets)
                 self.stats.pages_processed = page_num
                 self.stats.current_action = (
-                    f"Streaming records from Himalayas API (Offsets: {offset}-{page_offsets[-1]})..."
+                    f"Streaming {target_desc} from Himalayas API (Offsets: {offset}-{page_offsets[-1]})..."
                 )
                 if on_progress:
                     await on_progress(self.stats)
 
                 try:
+                    def _build_api_url(page_off: int) -> str:
+                        if search_query:
+                            return f"https://himalayas.app/jobs/api/search?q={quote(search_query)}&offset={page_off}&limit={limit}"
+                        return f"https://himalayas.app/jobs/api?offset={page_off}&limit={limit}"
+
                     while True:
                         responses = await asyncio.gather(
                             *(
                                 client.get(
-                                    f"https://himalayas.app/jobs/api?offset={page_offset}&limit={limit}",
+                                    _build_api_url(page_offset),
                                     headers={"User-Agent": "Mozilla/5.0"},
                                 )
                                 for page_offset in page_offsets
