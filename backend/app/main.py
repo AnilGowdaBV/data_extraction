@@ -91,5 +91,6 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=(settings.APP_ENV == "development"),
+        reload_excludes=["backend/data/*", "downloads/*", "*.db", "*.db-wal", "*.db-shm"],
         loop=loop_type,
     )

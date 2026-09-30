@@ -104,3 +104,47 @@ def test_repository_himalayas_posted_date_and_company_profiles() -> None:
         assert rec.posted_date != "Unknown"
         assert "ago" in rec.posted_date or rec.posted_date == "Today"
 
+
+def test_repository_published_at_normalization_and_sources() -> None:
+    """Verify that published_at integers are normalized to ISO string text and get_stats includes sources."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        db_path = os.path.join(temp_dir, "test_jobs.db")
+        repo = JobRepository(db_path=db_path)
+
+        # Insert 1 Himalayas job with unix timestamp
+        repo.register_job(
+            company_name="Acme Startup",
+            job_role="Fullstack Engineer",
+            number_of_people="11-50",
+            job_url="https://himalayas.app/jobs/acme-fullstack",
+            source_website="himalayas.app",
+            posted_date="Just now",
+            published_at=1790740000,
+        )
+
+        # Insert 1 Instahyre job
+        repo.register_job(
+            company_name="Beta Corp",
+            job_role="DevOps Engineer",
+            number_of_people="1-10",
+            job_url="https://instahyre.com/job/123",
+            source_website="instahyre.com",
+            posted_date="1 day ago",
+            published_at="2026-09-29 10:00:00",
+        )
+
+        # Check typeof in SQLite to ensure text
+        with get_db_connection(db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT published_at, typeof(published_at) FROM scraped_jobs WHERE company_name = 'Acme Startup';")
+            row = cursor.fetchone()
+            assert row[1] == "text"
+            assert "2026-" in str(row[0])
+
+        # Check stats
+        stats = repo.get_stats()
+        assert stats["total_jobs"] == 2
+        assert stats["sources"]["himalayas"] == 1
+        assert stats["sources"]["instahyre"] == 1
+        assert stats["sources"]["other"] == 0
+

@@ -55,6 +55,22 @@ class JobRepository:
         fingerprint = self.compute_fingerprint(company_name, job_role, job_url)
         str_people = str(number_of_people)
 
+        # Standardize published_at to ISO string format (YYYY-MM-DD HH:MM:SS)
+        norm_published_at = None
+        if published_at is not None:
+            if isinstance(published_at, (int, float)) or (isinstance(published_at, str) and published_at.isdigit()):
+                try:
+                    norm_published_at = datetime.fromtimestamp(float(published_at), tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    norm_published_at = str(published_at)
+            elif isinstance(published_at, str) and published_at.strip():
+                try:
+                    clean_str = published_at.strip().replace("Z", "+00:00")
+                    dt = datetime.fromisoformat(clean_str)
+                    norm_published_at = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    norm_published_at = published_at.strip()
+
         with get_db_connection(self.db_path) as conn:
             cursor = conn.cursor()
 
@@ -82,7 +98,7 @@ class JobRepository:
                         published_at = COALESCE(?, published_at)
                     WHERE id = ?;
                     """,
-                    (str_people, str_people, str_people, job_url, posted_date, published_at, job_id),
+                    (str_people, str_people, str_people, job_url, posted_date, norm_published_at, job_id),
                 )
                 conn.commit()
                 return job_id, False, str(first_seen_at)
@@ -103,7 +119,7 @@ class JobRepository:
                         str_people,
                         source_website,
                         posted_date,
-                        published_at,
+                        norm_published_at,
                     ),
                 )
                 conn.commit()
@@ -183,10 +199,21 @@ class JobRepository:
                 """)
             total_companies = cursor.fetchone()["total_companies"]
 
+            cursor.execute("SELECT COUNT(*) as himalayas FROM scraped_jobs WHERE source_website LIKE '%himalayas%';")
+            himalayas_jobs = cursor.fetchone()["himalayas"]
+
+            cursor.execute("SELECT COUNT(*) as instahyre FROM scraped_jobs WHERE source_website LIKE '%instahyre%';")
+            instahyre_jobs = cursor.fetchone()["instahyre"]
+
             return {
                 "total_jobs": total_jobs,
                 "new_today": new_today,
                 "total_companies": total_companies,
+                "sources": {
+                    "instahyre": instahyre_jobs,
+                    "himalayas": himalayas_jobs,
+                    "other": max(0, total_jobs - (instahyre_jobs + himalayas_jobs)),
+                },
             }
 
     def get_all_jobs(self, source_website: Optional[str] = None) -> list[ProcessedJobRecord]:

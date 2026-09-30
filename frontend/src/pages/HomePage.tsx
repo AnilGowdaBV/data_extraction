@@ -31,6 +31,19 @@ export const HomePage: React.FC = () => {
     setApplyOpen(true);
   };
 
+  const handleTabChange = (t: Tab) => {
+    setActiveTab(t);
+    if (t === 'archive') {
+      setRefreshTrigger((prev) => prev + 1);
+    }
+  };
+
+  React.useEffect(() => {
+    if (status === 'completed' || status === 'stopped' || summary) {
+      setRefreshTrigger((prev) => prev + 1);
+    }
+  }, [status, summary]);
+
 
   return (
     <div className="min-h-screen flex flex-col bg-[#080B14] overflow-hidden relative selection:bg-indigo-500/40">
@@ -61,7 +74,7 @@ export const HomePage: React.FC = () => {
             {TABS.map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
-                onClick={() => setActiveTab(id)}
+                onClick={() => handleTabChange(id)}
                 className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold transition-all duration-200 ${
                   activeTab === id
                     ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/30'
@@ -92,7 +105,7 @@ export const HomePage: React.FC = () => {
           {TABS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setActiveTab(id)}
+              onClick={() => handleTabChange(id)}
               className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
                 activeTab === id ? 'bg-indigo-600 text-white' : 'text-slate-400 bg-slate-800/60'
               }`}

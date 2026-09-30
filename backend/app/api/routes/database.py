@@ -21,21 +21,7 @@ repository = JobRepository()
 @router.get("/stats")
 async def get_database_stats() -> dict:
     """Return high-level summary stats of all accumulated jobs in SQLite."""
-    stats = repository.get_stats()
-    # Also get breakdown by source
-    instahyre_jobs = len(repository.get_all_jobs(source_website="instahyre"))
-    himalayas_jobs = len(repository.get_all_jobs(source_website="himalayas"))
-    
-    return {
-        "total_jobs": stats["total_jobs"],
-        "new_today": stats["new_today"],
-        "total_companies": stats["total_companies"],
-        "sources": {
-            "instahyre": instahyre_jobs,
-            "himalayas": himalayas_jobs,
-            "other": stats["total_jobs"] - (instahyre_jobs + himalayas_jobs),
-        },
-    }
+    return repository.get_stats()
 
 
 @router.get("/export")

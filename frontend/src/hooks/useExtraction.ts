@@ -56,6 +56,9 @@ export function useExtraction() {
               try {
                 const finalSummary = await getExtractionSummary(res.job_id);
                 setSummary(finalSummary);
+                try {
+                  sessionStorage.setItem('last_extraction_summary', JSON.stringify(finalSummary));
+                } catch { /* silent */ }
               } catch (e) {
                 console.error('Failed to load summary', e);
               }
@@ -95,6 +98,9 @@ export function useExtraction() {
           try {
             const finalSummary = await getExtractionSummary(jobId);
             setSummary(finalSummary);
+            try {
+              sessionStorage.setItem('last_extraction_summary', JSON.stringify(finalSummary));
+            } catch { /* silent */ }
           } catch (e) {
             console.warn('Summary not ready yet', e);
           }
@@ -110,12 +116,29 @@ export function useExtraction() {
     if (unsubscribeRef.current) {
       unsubscribeRef.current();
     }
+    try {
+      sessionStorage.removeItem('last_extraction_summary');
+    } catch { /* silent */ }
     setStatus('idle');
     setJobId(null);
     setProgress(null);
     setSummary(null);
     setError(null);
     setLogs([]);
+  }, []);
+
+  // Restore last completed extraction summary on mount/refresh if available
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem('last_extraction_summary');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          setSummary(parsed);
+          setStatus('completed');
+        }
+      }
+    } catch { /* silent */ }
   }, []);
 
   useEffect(() => {
