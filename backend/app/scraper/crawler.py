@@ -242,6 +242,8 @@ class JobCrawler:
                         profile_fetcher=fetch_company_profile,
                     )
 
+                if not is_eligible_company_size(emp_count):
+                    continue
                 if str(emp_count).strip() in ("N/A", "Unknown", "", "None"):
                     self.stats.missing_employee_counts += 1
 
@@ -510,6 +512,8 @@ class JobCrawler:
 
                         # Resolve employee count
                         emp_count = company_sizes.get(company_slug) or "N/A"
+                        if not is_eligible_company_size(emp_count):
+                            continue
                         if str(emp_count).strip() in ("N/A", "Unknown", "", "None"):
                             self.stats.missing_employee_counts += 1
 

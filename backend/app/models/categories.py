@@ -16,22 +16,22 @@ def is_size_unspecified(value: Any) -> bool:
 
 
 def is_under_100_people(value: Any) -> bool:
-    """Check if the employee count represents fewer than 100 people or startup bracket (e.g. 51-200)."""
+    """Check if the employee count strictly represents fewer than 100 people."""
     if value is None or str(value).strip() in ("N/A", "Unknown", "", "None"):
         return False
     if isinstance(value, (int, float)):
-        return value <= 100
+        return value < 100
     s = str(value).lower().strip()
     m_range = re.search(r"(\d+)\s*[-–—to]+\s*(\d+)", s)
     if m_range:
         low, high = int(m_range.group(1)), int(m_range.group(2))
-        return low <= 100
+        return high <= 100
     m_plus = re.search(r"(\d+)\+", s)
     if m_plus:
         return False
     m_num = re.search(r"(\d+)", s)
     if m_num:
-        return int(m_num.group(1)) <= 100
+        return int(m_num.group(1)) < 100
     return False
 
 
