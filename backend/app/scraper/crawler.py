@@ -323,6 +323,7 @@ class JobCrawler:
         limit = 20
         parallel_pages = 2
         page_num = 0
+        total_api_count: Optional[int] = None
 
         search_query: Optional[str] = None
         if start_url:
@@ -455,10 +456,18 @@ class JobCrawler:
                                 page_offset,
                             )
                             continue
-                        raw_jobs.extend(resp.json().get("jobs", []))
+                        data = resp.json()
+                        if total_api_count is None and data.get("totalCount") is not None:
+                            total_api_count = data.get("totalCount")
+                            logger.info("Himalayas reported total result count: %d", total_api_count)
+                        raw_jobs.extend(data.get("jobs", []))
 
                     if not raw_jobs:
                         logger.info("No further jobs returned from Himalayas API.")
+                        break
+
+                    if total_api_count is not None and offset >= total_api_count:
+                        logger.info("Offset %d reached total reported count %d. Completing search crawl.", offset, total_api_count)
                         break
 
                     # Extract all cards
