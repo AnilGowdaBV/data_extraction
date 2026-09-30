@@ -16,6 +16,7 @@ export interface RecentJob {
   job_url?: string | null;
   source_website: string;
   first_seen_at?: string | null;
+  posted_date?: string | null;
   role_category: string;
 }
 
@@ -315,7 +316,7 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
                   {/* Left: Scrape date / relative time + optional external link */}
                   <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
                     <span className="font-mono text-[10px] text-slate-400">
-                      {formatRelativeTime(job.first_seen_at)}
+                      {job.posted_date || formatRelativeTime(job.first_seen_at)}
                     </span>
 
                     {job.job_url && (

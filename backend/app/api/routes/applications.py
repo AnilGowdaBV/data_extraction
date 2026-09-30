@@ -91,8 +91,8 @@ async def get_recent_jobs(
     source: str = Query("himalayas", description="Filter source, e.g. 'himalayas', 'instahyre', or 'all'"),
 ) -> dict:
     """
-    Returns the most recently scraped jobs from the master database.
-    Defaults to Himalayas source.
+    Returns the most recently posted jobs from the master database.
+    Defaults to Himalayas source, ordered by real published date.
     """
     s_lower = source.lower()
     if s_lower == "himalayas":
@@ -106,10 +106,10 @@ async def get_recent_jobs(
         cursor = conn.cursor()
         cursor.execute(
             f"""
-            SELECT id, fingerprint, job_url, company_name, job_role, number_of_people, source_website, first_seen_at
+            SELECT id, fingerprint, job_url, company_name, job_role, number_of_people, source_website, first_seen_at, posted_date, published_at
             FROM scraped_jobs
             {where_clause}
-            ORDER BY first_seen_at DESC, id DESC
+            ORDER BY COALESCE(published_at, first_seen_at) DESC, id DESC
             LIMIT ?;
             """,
             (limit,),
@@ -125,6 +125,7 @@ async def get_recent_jobs(
             "job_url": row["job_url"],
             "source_website": row["source_website"],
             "first_seen_at": str(row["first_seen_at"]) if row["first_seen_at"] else None,
+            "posted_date": row["posted_date"] or (str(row["first_seen_at"]) if row["first_seen_at"] else "Recently"),
             "role_category": classify_role(row["job_role"]),
         }
         for row in rows
