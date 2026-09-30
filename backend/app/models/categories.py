@@ -40,12 +40,10 @@ def is_eligible_company_size(value: Any) -> bool:
     Check if the company size is eligible:
     - Less than 100 people (< 100)
     - OR not mentioned / N/A
-    Companies with 100+ employees are NOT eligible.
     """
     if is_size_unspecified(value):
         return True
     return is_under_100_people(value)
-
 
 
 CATEGORIES: Dict[str, Dict[str, Any]] = {
@@ -56,6 +54,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "CheckSquare",
         "color": "emerald",
         "keywords": [
+            {"name": "QA & SDET", "terms": ["qa", "sdet", "quality assurance", "test engineer", "testing", "automation engineer", "qa analyst", "qa engineer", "qa lead"]},
             {"name": "Selenium", "terms": ["selenium"]},
             {"name": "Playwright", "terms": ["playwright"]},
             {"name": "Cypress", "terms": ["cypress"]},
@@ -71,6 +70,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "Cloud",
         "color": "sky",
         "keywords": [
+            {"name": "DevOps & SRE", "terms": ["devops", "sre", "site reliability", "cloud", "infrastructure", "sysadmin", "system administrator", "aws", "azure", "gcp"]},
             {"name": "Kubernetes", "terms": ["kubernetes", "k8s"]},
             {"name": "Terraform", "terms": ["terraform"]},
         ],
@@ -82,6 +82,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "Layout",
         "color": "cyan",
         "keywords": [
+            {"name": "Frontend", "terms": ["frontend", "front-end", "front end", "ui engineer", "web developer"]},
             {"name": "React", "terms": ["react", "react.js", "reactjs"]},
             {"name": "iOS", "terms": ["ios", "swift", "objective-c"]},
             {"name": "Angular", "terms": ["angular", "angularjs"]},
@@ -99,6 +100,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "Server",
         "color": "indigo",
         "keywords": [
+            {"name": "Backend", "terms": ["backend", "back-end", "back end", "api engineer", "server engineer"]},
             {"name": "Java", "terms": ["java ", "java/", "java-", "java,", "java engineer", "java developer", "spring boot", "springboot"]},
             {"name": "Node", "terms": ["node", "nodejs", "node.js", "express"]},
             {"name": "Golang", "terms": ["golang", "go developer", "go engineer", "go software"]},
@@ -113,7 +115,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "BarChart3",
         "color": "amber",
         "keywords": [
-            {"name": "Data Analyst", "terms": ["data analyst", "business intelligence", "bi analyst", "analytics engineer"]},
+            {"name": "Data Analyst", "terms": ["data analyst", "business intelligence", "bi analyst", "analytics engineer", "data analytics", "data analysis", "tableau", "power bi"]},
         ],
     },
     "data_engineering": {
@@ -123,7 +125,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "Database",
         "color": "orange",
         "keywords": [
-            {"name": "Data Engineering", "terms": ["data engineer", "data engineering", "etl", "big data", "spark", "hadoop", "databricks"]},
+            {"name": "Data Engineering", "terms": ["data engineer", "data engineering", "etl", "big data", "spark", "hadoop", "databricks", "data pipeline"]},
         ],
     },
     "ux_design": {
@@ -133,7 +135,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "Palette",
         "color": "purple",
         "keywords": [
-            {"name": "UX Designer", "terms": ["ux designer", "ui/ux", "product designer", "user experience", "interaction design"]},
+            {"name": "UX & UI Design", "terms": ["ux designer", "ui/ux", "product designer", "user experience", "interaction design", "figma", "ui designer", "web designer"]},
         ],
     },
     "fde": {
@@ -143,7 +145,7 @@ CATEGORIES: Dict[str, Dict[str, Any]] = {
         "icon": "Zap",
         "color": "rose",
         "keywords": [
-            {"name": "FDE", "terms": ["forward deployed", "forward-deployed", "fde", "solutions engineer", "deployment engineer"]},
+            {"name": "FDE & Solutions", "terms": ["forward deployed", "forward-deployed", "fde", "solutions engineer", "deployment engineer", "solutions architect", "integration engineer"]},
         ],
     },
 }
