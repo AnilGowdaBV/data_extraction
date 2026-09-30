@@ -242,8 +242,8 @@ class JobCrawler:
                         profile_fetcher=fetch_company_profile,
                     )
 
-                if not is_eligible_company_size(emp_count):
-                    continue
+                if str(emp_count).strip() in ("N/A", "Unknown", "", "None"):
+                    self.stats.missing_employee_counts += 1
 
                 # Validation
                 if DataValidator.is_valid_record(clean_company, clean_role, emp_count):
@@ -510,8 +510,8 @@ class JobCrawler:
 
                         # Resolve employee count
                         emp_count = company_sizes.get(company_slug) or "N/A"
-                        if not is_eligible_company_size(emp_count):
-                            continue
+                        if str(emp_count).strip() in ("N/A", "Unknown", "", "None"):
+                            self.stats.missing_employee_counts += 1
 
                         # Derive accurate Himalayas posted date relative label (e.g. '11 days ago', '1 day ago', '5 days ago')
                         if pub_date_raw:
