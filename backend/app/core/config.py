@@ -38,5 +38,13 @@ class Settings(BaseSettings):
     # Persistence / Database
     DB_PATH: str = "backend/data/jobs.db"
 
+    # Google Sheets Integration
+    GOOGLE_SHEETS_WEBHOOK_URL: str = (
+        "https://script.google.com/macros/s/AKfycbx2cFrtQBimzhlJem5ZRA_PPDgvq0vMvEw-grXRqNXLIVIDeWn3MSbqwZdijO3-mv6r/exec"
+    )
+    GOOGLE_SHEET_URL: str = (
+        "https://docs.google.com/spreadsheets/d/1wrwZlp3kJRDdRvwIgCrrbd3rCJFHEsIigLop-hwHPSs/edit?usp=sharing"
+    )
+
 
 settings = Settings()

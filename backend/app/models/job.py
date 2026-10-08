@@ -39,18 +39,31 @@ class ProcessedJobRecord:
     is_new: bool = True
     db_id: int | None = None
     posted_date: str = "Unknown"  # Human-readable age label e.g. "3 days ago"
+    location: str = "N/A"
+    posted_by: str = "N/A"
+    first_seen_at: str | None = None
 
     def to_row(self) -> list[str | int]:
         """Convert to row format for Excel sheet."""
         status_label = "NEW" if self.is_new else "EXISTING"
-        return [self.company_name, self.job_role, self.number_of_people, self.posted_date, status_label]
+        return [
+            self.company_name,
+            self.job_role,
+            self.location or "N/A",
+            self.number_of_people,
+            self.posted_by or "N/A",
+            self.posted_date,
+            status_label,
+        ]
 
     def to_dict(self) -> dict:
         """Convert to dictionary representation."""
         return {
             "company_name": self.company_name,
             "job_role": self.job_role,
+            "location": self.location or "N/A",
             "number_of_people": self.number_of_people,
+            "posted_by": self.posted_by or "N/A",
             "job_url": self.job_url,
             "posted_date": self.posted_date,
             "status": "NEW" if self.is_new else "EXISTING",

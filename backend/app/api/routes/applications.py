@@ -106,7 +106,7 @@ async def get_recent_jobs(
         cursor = conn.cursor()
         cursor.execute(
             f"""
-            SELECT id, fingerprint, job_url, company_name, job_role, number_of_people, source_website, first_seen_at, posted_date, published_at
+            SELECT id, fingerprint, job_url, company_name, job_role, number_of_people, source_website, first_seen_at, posted_date, published_at, location, posted_by
             FROM scraped_jobs
             {where_clause}
             ORDER BY COALESCE(published_at, first_seen_at) DESC, id DESC
@@ -121,6 +121,8 @@ async def get_recent_jobs(
             "id": row["id"],
             "company_name": row["company_name"],
             "job_role": row["job_role"],
+            "location": row["location"] or "N/A",
+            "posted_by": row["posted_by"] or "N/A",
             "number_of_people": row["number_of_people"],
             "job_url": row["job_url"],
             "source_website": row["source_website"],

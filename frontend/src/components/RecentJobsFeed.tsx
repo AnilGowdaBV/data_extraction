@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Briefcase, ExternalLink, Users, Search,
-  RefreshCw, ChevronRight, Zap, Check,
+  RefreshCw, ChevronRight, Zap, Check, MapPin, UserCheck,
 } from 'lucide-react';
 
 import { PrefillJob } from './ApplyModal';
@@ -12,6 +12,8 @@ export interface RecentJob {
   id: number;
   company_name: string;
   job_role: string;
+  location?: string | null;
+  posted_by?: string | null;
   number_of_people?: string | null;
   job_url?: string | null;
   source_website: string;
@@ -23,6 +25,7 @@ export interface RecentJob {
 interface RecentJobsFeedProps {
   onApplyJob: (job: PrefillJob) => void;
   refreshTrigger?: number;
+  source?: string;
 }
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; border: string }> = {
@@ -78,7 +81,7 @@ function formatRelativeTime(dateStr?: string | null): string {
   }
 }
 
-export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refreshTrigger = 0 }) => {
+export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refreshTrigger = 0, source = 'himalayas' }) => {
   const [jobs, setJobs] = useState<RecentJob[]>([]);
   const [limit, setLimit] = useState<number>(20);
   const [search, setSearch] = useState<string>('');
@@ -89,7 +92,8 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
   const fetchRecentJobs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/applications/recent-jobs?limit=${limit}&source=himalayas`);
+      const srcParam = encodeURIComponent(source);
+      const res = await fetch(`${API_BASE}/api/applications/recent-jobs?limit=${limit}&source=${srcParam}`);
       if (res.ok) {
         const data = await res.json();
         setJobs(data.jobs || []);
@@ -99,7 +103,7 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
     } finally {
       setLoading(false);
     }
-  }, [limit]);
+  }, [limit, source]);
 
   useEffect(() => {
     fetchRecentJobs();
@@ -287,12 +291,20 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
                       <p className="text-xs font-bold text-white truncate group-hover:text-indigo-200 transition-colors">
                         {job.company_name}
                       </p>
-                      {job.number_of_people && (
-                        <p className="text-[10px] text-slate-500 truncate flex items-center gap-1">
-                          <Users className="w-2.5 h-2.5 shrink-0" />
-                          <span>{job.number_of_people.replace('employees', 'emp')}</span>
-                        </p>
-                      )}
+                      <div className="flex items-center gap-2 truncate mt-0.5">
+                        {job.number_of_people && (
+                          <p className="text-[10px] text-slate-500 truncate flex items-center gap-1">
+                            <Users className="w-2.5 h-2.5 shrink-0" />
+                            <span>{job.number_of_people.replace('employees', 'emp')}</span>
+                          </p>
+                        )}
+                        {job.location && job.location !== 'N/A' && (
+                          <p className="text-[10px] text-indigo-300/90 truncate flex items-center gap-0.5 font-medium">
+                            <MapPin className="w-2.5 h-2.5 shrink-0 text-indigo-400" />
+                            <span>{job.location}</span>
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -311,6 +323,20 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
                   </h4>
                 </div>
 
+                {/* Recruiter / Posted By */}
+                {job.posted_by && job.posted_by !== 'N/A' && (
+                  <p
+                    className="text-[11px] text-emerald-300 truncate flex items-center gap-1.5 font-medium bg-emerald-950/30 px-2 py-1 rounded-lg border border-emerald-500/20"
+                    title={`Posted by: ${job.posted_by}`}
+                  >
+                    <UserCheck className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+                    <span className="truncate">
+                      <span className="text-slate-400 font-normal">Posted by: </span>
+                      {job.posted_by}
+                    </span>
+                  </p>
+                )}
+
                 {/* Footer Info & Action */}
                 <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between gap-2">
                   {/* Left: Scrape date / relative time + optional external link */}
@@ -318,6 +344,15 @@ export const RecentJobsFeed: React.FC<RecentJobsFeedProps> = ({ onApplyJob, refr
                     <span className="font-mono text-[10px] text-slate-400">
                       {job.posted_date || formatRelativeTime(job.first_seen_at)}
                     </span>
+                    {job.source_website && (
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                        job.source_website.includes('instahyre')
+                          ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-sky-500/10 text-sky-300 border border-sky-500/30'
+                      }`}>
+                        {job.source_website.includes('instahyre') ? 'Instahyre' : 'Himalayas'}
+                      </span>
+                    )}
 
                     {job.job_url && (
                       <a

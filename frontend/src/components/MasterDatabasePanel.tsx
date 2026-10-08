@@ -5,7 +5,7 @@ import {
   CheckCircle2, Loader2, Users, ArrowDownToLine,
   FileSpreadsheet, Filter, Check,
   CheckSquare, Cloud, Layout, Server,
-  Palette, Zap
+  Palette, Zap, ExternalLink
 } from 'lucide-react';
 
 import { RecentJobsFeed } from './RecentJobsFeed';
@@ -87,6 +87,8 @@ const CATEGORY_THEME: Record<string, { bg: string; border: string; text: string;
   },
 };
 
+type SourceFilter = 'himalayas' | 'instahyre' | 'all';
+
 export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
   refreshTrigger = 0,
   onApplyJob,
@@ -95,29 +97,89 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
   const [stats, setStats] = useState<DbStats | null>(null);
   const [appStats, setAppStats] = useState<AppStats | null>(null);
   const [categories, setCategories] = useState<CategoryOverview[]>([]);
+  const [activeSource, setActiveSource] = useState<SourceFilter>('himalayas');
   const [loading, setLoading] = useState(false);
+  const [loadingCats, setLoadingCats] = useState(false);
   const [dlJob, setDlJob] = useState<DL>('idle');
   const [dlApps, setDlApps] = useState<DL>('idle');
   const [dlCat, setDlCat] = useState<Record<string, DL>>({});
   const [lastRefresh, setLastRefresh] = useState('');
+  const [gsSyncState, setGsSyncState] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [gsSyncMsg, setGsSyncMsg] = useState<string>('');
+
+  const syncGoogleSheet = async () => {
+    setGsSyncState('loading');
+    setGsSyncMsg('');
+    try {
+      const srcParam = activeSource !== 'all' ? `?source=${encodeURIComponent(activeSource)}` : '';
+      const res = await fetch(`${API_BASE}/api/database/sync-google-sheet${srcParam}`, {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error('Sync failed');
+      const data = await res.json();
+      if (data.success) {
+        setGsSyncState('done');
+        const tabSummary = data.date_tabs
+          ? Object.keys(data.date_tabs).join(', ')
+          : (data.sheet_name || 'date tabs');
+        setGsSyncMsg(`Successfully dumped ${data.total_synced || data.synced_count} jobs across date tabs (${tabSummary})!`);
+        setTimeout(() => setGsSyncState('idle'), 8000);
+      } else {
+        setGsSyncState('error');
+        setGsSyncMsg(data.error || 'Failed to sync to Google Sheet');
+        setTimeout(() => setGsSyncState('idle'), 6000);
+      }
+    } catch {
+      setGsSyncState('error');
+      setGsSyncMsg('Could not connect to Google Sheets backend');
+      setTimeout(() => setGsSyncState('idle'), 6000);
+    }
+  };
+
+  const fetchCategoryData = useCallback(async (sourceKey: SourceFilter) => {
+    setLoadingCats(true);
+    try {
+      const cats = await getCategoriesOverview(sourceKey);
+      if (Array.isArray(cats)) setCategories(cats);
+    } catch {
+      /* silent */
+    } finally {
+      setLoadingCats(false);
+    }
+  }, []);
 
   const fetchStats = useCallback(async () => {
     setLoading(true);
     try {
-      const [j, a, cats] = await Promise.all([
+      const [j, a] = await Promise.all([
         fetch(`${API_BASE}/api/database/stats`).then(r => r.json()),
         fetch(`${API_BASE}/api/applications/stats`).then(r => r.json()),
-        getCategoriesOverview().catch(() => []),
       ]);
-      setStats(j); setAppStats(a);
-      if (Array.isArray(cats)) setCategories(cats);
+      setStats(j);
+      setAppStats(a);
       setLastRefresh(new Date().toLocaleTimeString());
     } catch { /* silent */ }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchStats(); }, [fetchStats]);
-  useEffect(() => { if (refreshTrigger > 0) fetchStats(); }, [refreshTrigger, fetchStats]);
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  useEffect(() => {
+    fetchCategoryData(activeSource);
+  }, [activeSource, fetchCategoryData]);
+
+  useEffect(() => {
+    if (refreshTrigger > 0) {
+      fetchStats();
+      fetchCategoryData(activeSource);
+    }
+  }, [refreshTrigger, fetchStats, fetchCategoryData, activeSource]);
+
+  const handleSourceChange = (newSource: SourceFilter) => {
+    setActiveSource(newSource);
+  };
 
   const download = async (source?: string, type: 'jobs' | 'apps' = 'jobs') => {
     const setter = type === 'jobs' ? setDlJob : setDlApps;
@@ -143,13 +205,15 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
   const downloadCategory = async (cat: CategoryOverview) => {
     setDlCat(prev => ({ ...prev, [cat.id]: 'loading' }));
     try {
-      const url = getCategoryExportUrl(cat.id);
+      const url = getCategoryExportUrl(cat.id, activeSource);
       const res = await fetch(url);
       if (!res.ok) throw new Error('Download failed');
       const blob = await res.blob();
       const disp = res.headers.get('content-disposition') || '';
       const match = disp.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-      const filename = match ? match[1].replace(/['"]/g, '') : cat.filename;
+      const prefix = activeSource !== 'all' ? `${activeSource.charAt(0).toUpperCase() + activeSource.slice(1)}_` : '';
+      const fallback = `${prefix}${cat.filename}`;
+      const filename = match ? match[1].replace(/['"]/g, '') : fallback;
       const obj = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = obj; a.download = filename;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -202,6 +266,221 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
         ))}
       </div>
 
+      {/* ── Platform / Source Switcher ── */}
+      <div className="glass rounded-2xl p-4 sm:p-5 border border-slate-800/80 space-y-3 bg-slate-950/40">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+              <Globe2 className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white tracking-tight">Platform / Company Filter</h3>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  Live Segregation
+                </span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Segregate all 8 domain workbooks & recent jobs by your chosen platform
+              </p>
+            </div>
+          </div>
+
+          {loadingCats && (
+            <div className="flex items-center gap-1.5 text-xs text-indigo-400 font-medium">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Updating dataset...</span>
+            </div>
+          )}
+        </div>
+
+        {/* Switcher Buttons */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+          {/* Himalayas */}
+          <button
+            type="button"
+            onClick={() => handleSourceChange('himalayas')}
+            className={`relative flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-[0.99] cursor-pointer ${
+              activeSource === 'himalayas'
+                ? 'bg-sky-500/15 border-sky-500/60 shadow-lg shadow-sky-950/40 text-white ring-1 ring-sky-500/40'
+                : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700/80 hover:bg-slate-900/90'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                activeSource === 'himalayas'
+                  ? 'bg-sky-500 text-slate-950 shadow-md shadow-sky-500/30'
+                  : 'bg-slate-800 text-sky-400 border border-slate-700'
+              }`}>
+                🏔️
+              </div>
+              <div>
+                <p className="text-xs font-bold leading-tight text-white">Himalayas</p>
+                <p className="text-[10px] font-mono text-slate-400">himalayas.app</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md ${
+                activeSource === 'himalayas'
+                  ? 'bg-sky-500/25 text-sky-200 border border-sky-400/40'
+                  : 'bg-slate-800 text-slate-400'
+              }`}>
+                {stats?.sources.himalayas.toLocaleString() ?? '17,691'} jobs
+              </span>
+            </div>
+          </button>
+
+          {/* Instahyre */}
+          <button
+            type="button"
+            onClick={() => handleSourceChange('instahyre')}
+            className={`relative flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-[0.99] cursor-pointer ${
+              activeSource === 'instahyre'
+                ? 'bg-emerald-500/15 border-emerald-500/60 shadow-lg shadow-emerald-950/40 text-white ring-1 ring-emerald-500/40'
+                : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700/80 hover:bg-slate-900/90'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                activeSource === 'instahyre'
+                  ? 'bg-emerald-500 text-slate-950 shadow-md shadow-emerald-500/30'
+                  : 'bg-slate-800 text-emerald-400 border border-slate-700'
+              }`}>
+                ⚡
+              </div>
+              <div>
+                <p className="text-xs font-bold leading-tight text-white">Instahyre</p>
+                <p className="text-[10px] font-mono text-slate-400">instahyre.com</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md ${
+                activeSource === 'instahyre'
+                  ? 'bg-emerald-500/25 text-emerald-200 border border-emerald-400/40'
+                  : 'bg-slate-800 text-slate-400'
+              }`}>
+                {stats?.sources.instahyre.toLocaleString() ?? '1,861'} jobs
+              </span>
+            </div>
+          </button>
+
+          {/* All Sources */}
+          <button
+            type="button"
+            onClick={() => handleSourceChange('all')}
+            className={`relative flex items-center justify-between p-3 rounded-xl border text-left transition-all active:scale-[0.99] cursor-pointer ${
+              activeSource === 'all'
+                ? 'bg-violet-500/15 border-violet-500/60 shadow-lg shadow-violet-950/40 text-white ring-1 ring-violet-500/40'
+                : 'bg-slate-900/60 border-slate-800/80 text-slate-400 hover:text-slate-200 hover:border-slate-700/80 hover:bg-slate-900/90'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs ${
+                activeSource === 'all'
+                  ? 'bg-violet-500 text-slate-950 shadow-md shadow-violet-500/30'
+                  : 'bg-slate-800 text-violet-400 border border-slate-700'
+              }`}>
+                🌐
+              </div>
+              <div>
+                <p className="text-xs font-bold leading-tight text-white">All Platforms</p>
+                <p className="text-[10px] font-mono text-slate-400">Combined Dataset</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md ${
+                activeSource === 'all'
+                  ? 'bg-violet-500/25 text-violet-200 border border-violet-400/40'
+                  : 'bg-slate-800 text-slate-400'
+              }`}>
+                {stats?.total_jobs.toLocaleString() ?? '19,552'} jobs
+              </span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Google Sheets Live Dump Card ── */}
+      <div className="glass rounded-2xl p-5 border border-emerald-500/30 bg-gradient-to-r from-emerald-950/30 via-slate-900/60 to-slate-950/80 shadow-xl shadow-emerald-950/20 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-lg shadow-sm">
+              📊
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-white">
+                  {activeSource === 'instahyre' ? '⚡ Instahyre Google Sheet Live Dump' : activeSource === 'himalayas' ? '🏔️ Himalayas Google Sheet Live Dump' : 'Google Spreadsheet Live Dump'}
+                </h3>
+                <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                  Date-Wise Tabs (Sep 23, Sep 24, Oct 8...)
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Automatically organizes all <strong className="text-white">{activeSource === 'instahyre' ? '1,861 Instahyre' : activeSource === 'himalayas' ? '17,691 Himalayas' : 'All'}</strong> jobs into separate tabs based on the day each job was scraped. Existing tabs &amp; rows are 100% safe.
+              </p>
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={syncGoogleSheet}
+              disabled={gsSyncState === 'loading'}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-md active:scale-95 cursor-pointer ${
+                gsSyncState === 'loading'
+                  ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                  : gsSyncState === 'done'
+                  ? 'bg-emerald-600 text-white shadow-emerald-900/40'
+                  : gsSyncState === 'error'
+                  ? 'bg-rose-600 text-white'
+                  : 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-emerald-950/50'
+              }`}
+            >
+              {gsSyncState === 'loading' ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Dumping to Sheet...</span>
+                </>
+              ) : gsSyncState === 'done' ? (
+                <>
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Dumped to Sheet!</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5 text-emerald-200" />
+                  <span>Sync to Google Sheet</span>
+                </>
+              )}
+            </button>
+
+            <a
+              href="https://docs.google.com/spreadsheets/d/1wrwZlp3kJRDdRvwIgCrrbd3rCJFHEsIigLop-hwHPSs/edit?usp=sharing"
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold glass border border-slate-700/80 hover:border-emerald-500/40 text-slate-300 hover:text-white transition-all"
+              title="Open Google Spreadsheet in new tab"
+            >
+              <span>Open Sheet</span>
+              <ExternalLink className="w-3 h-3 text-emerald-400" />
+            </a>
+          </div>
+        </div>
+
+        {/* Live sync notification banner */}
+        {gsSyncMsg && (
+          <div className={`p-2.5 rounded-xl text-xs font-medium border flex items-center justify-between ${
+            gsSyncState === 'error'
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-200'
+          }`}>
+            <span>{gsSyncMsg}</span>
+          </div>
+        )}
+      </div>
+
       {/* ── Category & Domain Dedicated Workbooks Section ── */}
       {categories.length > 0 && (
         <div className="space-y-4">
@@ -211,7 +490,18 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
                 <FileSpreadsheet className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-white">Domain & Keyword Workbooks</h3>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-bold text-white">Domain & Keyword Workbooks</h3>
+                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md ${
+                    activeSource === 'instahyre'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : activeSource === 'himalayas'
+                      ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                      : 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+                  }`}>
+                    {activeSource === 'instahyre' ? '⚡ Instahyre Active' : activeSource === 'himalayas' ? '🏔️ Himalayas Active' : '🌐 All Active'}
+                  </span>
+                </div>
                 <p className="text-[11px] text-slate-400">
                   Each Excel file has dedicated tabs per keyword + separate sheets for companies with <strong className="text-emerald-300">&lt; 100 people</strong>
                 </p>
@@ -227,6 +517,8 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
               const dlState = dlCat[cat.id] || 'idle';
               const IconComp = CATEGORY_ICON_MAP[cat.icon] || FileSpreadsheet;
               const theme = CATEGORY_THEME[cat.id] || CATEGORY_THEME.qa_automation;
+              const prefix = activeSource !== 'all' ? `${activeSource.charAt(0).toUpperCase() + activeSource.slice(1)}_` : '';
+              const displayFilename = `${prefix}${cat.filename}`;
 
               return (
                 <div
@@ -242,7 +534,7 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
                         </div>
                         <div className="min-w-0">
                           <h4 className="text-sm font-bold text-white tracking-tight truncate">{cat.name}</h4>
-                          <p className="text-[11px] font-mono text-slate-400 truncate">{cat.filename}</p>
+                          <p className="text-[11px] font-mono text-slate-400 truncate">{displayFilename}</p>
                         </div>
                       </div>
 
@@ -291,7 +583,7 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
                   <button
                     onClick={() => downloadCategory(cat)}
                     disabled={dlState === 'loading'}
-                    className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md ${
+                    className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold transition-all active:scale-[0.98] shadow-md cursor-pointer ${
                       dlState === 'done'
                         ? 'bg-emerald-500 text-slate-950'
                         : `bg-gradient-to-r ${theme.btn} text-white`
@@ -300,17 +592,17 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
                     {dlState === 'loading' ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Generating {cat.filename}...</span>
+                        <span>Generating {displayFilename}...</span>
                       </>
                     ) : dlState === 'done' ? (
                       <>
                         <Check className="w-4 h-4" />
-                        <span>Downloaded {cat.filename}!</span>
+                        <span>Downloaded {displayFilename}!</span>
                       </>
                     ) : (
                       <>
                         <ArrowDownToLine className="w-4 h-4" />
-                        <span>Download {cat.name} ({cat.filename})</span>
+                        <span>Download {cat.name} ({displayFilename})</span>
                       </>
                     )}
                   </button>
@@ -408,6 +700,7 @@ export const MasterDatabasePanel: React.FC<MasterDatabasePanelProps> = ({
         <RecentJobsFeed
           onApplyJob={(job) => onApplyJob?.(job)}
           refreshTrigger={refreshTrigger}
+          source={activeSource}
         />
       )}
 

@@ -92,7 +92,9 @@ def init_db(db_path: Optional[str] = None) -> None:
                 last_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 scrape_count INTEGER DEFAULT 1,
                 posted_date TEXT,
-                published_at TIMESTAMP
+                published_at TIMESTAMP,
+                location TEXT,
+                posted_by TEXT
             );
 
             CREATE INDEX IF NOT EXISTS idx_jobs_fingerprint ON scraped_jobs(fingerprint);
@@ -138,6 +140,12 @@ def init_db(db_path: Optional[str] = None) -> None:
             cursor.execute("ALTER TABLE scraped_jobs ADD COLUMN posted_date TEXT;")
         if "published_at" not in existing_cols:
             cursor.execute("ALTER TABLE scraped_jobs ADD COLUMN published_at TIMESTAMP;")
+        if "location" not in existing_cols:
+            cursor.execute("ALTER TABLE scraped_jobs ADD COLUMN location TEXT;")
+        if "posted_by" not in existing_cols:
+            cursor.execute("ALTER TABLE scraped_jobs ADD COLUMN posted_by TEXT;")
+
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_jobs_location ON scraped_jobs(location);")
 
         # Auto-migrate any integer/unix published_at to standard ISO string format
         try:

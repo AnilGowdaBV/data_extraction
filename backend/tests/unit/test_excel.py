@@ -54,41 +54,49 @@ def test_excel_export_structure() -> None:
 
         # Check All Jobs sheet headers
         ws_all = wb["All Jobs"]
-        headers = [ws_all.cell(row=1, column=col).value for col in range(1, 6)]
-        assert headers == ["Company Name", "Job Role", "Number of People", "Date Posted / Discovered", "Status"]
+        headers = [ws_all.cell(row=1, column=col).value for col in range(1, 8)]
+        assert headers == [
+            "Company Name", "Job Role", "Location", "Number of People", "Posted By", "Date Posted / Discovered", "Status"
+        ]
 
         # Check records on All Jobs
-        row2 = [ws_all.cell(row=2, column=col).value for col in range(1, 6)]
+        row2 = [ws_all.cell(row=2, column=col).value for col in range(1, 8)]
         assert row2[0] == "ABC Technologies"
         assert row2[1] == "Software Engineer"
-        assert row2[2] == "10 - 50 employees"
-        assert row2[4] == "NEW"
+        assert row2[2] == "N/A"
+        assert row2[3] == "10 - 50 employees"
+        assert row2[4] == "N/A"
+        assert row2[6] == "NEW"
 
-        row3 = [ws_all.cell(row=3, column=col).value for col in range(1, 6)]
+        row3 = [ws_all.cell(row=3, column=col).value for col in range(1, 8)]
         assert row3[0] == "XYZ Solutions"
         assert row3[1] == "Backend Developer"
-        assert row3[2] == "More than 1000 employees"
-        assert row3[4] == "EXISTING"
+        assert row3[2] == "N/A"
+        assert row3[3] == "More than 1000 employees"
+        assert row3[4] == "N/A"
+        assert row3[6] == "EXISTING"
 
-        row4 = [ws_all.cell(row=4, column=col).value for col in range(1, 6)]
+        row4 = [ws_all.cell(row=4, column=col).value for col in range(1, 8)]
         assert row4[0] == "Global Enterprises"
         assert row4[1] == "Product Lead"
         assert row4[2] == "N/A"
-        assert row4[4] == "NEW"
+        assert row4[3] == "N/A"
+        assert row4[4] == "N/A"
+        assert row4[6] == "NEW"
 
         # Check New Jobs Only sheet
         ws_new = wb["New Jobs Only"]
         assert ws_new.max_row == 3  # Header + 2 new records
-        new_row1 = [ws_new.cell(row=2, column=col).value for col in range(1, 6)]
+        new_row1 = [ws_new.cell(row=2, column=col).value for col in range(1, 8)]
         assert new_row1[0] == "ABC Technologies"
-        assert new_row1[4] == "NEW"
+        assert new_row1[6] == "NEW"
 
         # Check Existing Jobs Only sheet
         ws_existing = wb["Existing Jobs Only"]
         assert ws_existing.max_row == 2  # Header + 1 existing record
-        exist_row1 = [ws_existing.cell(row=2, column=col).value for col in range(1, 6)]
+        exist_row1 = [ws_existing.cell(row=2, column=col).value for col in range(1, 8)]
         assert exist_row1[0] == "XYZ Solutions"
-        assert exist_row1[4] == "EXISTING"
+        assert exist_row1[6] == "EXISTING"
 
 
 def test_export_category_workbook() -> None:

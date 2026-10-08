@@ -55,7 +55,7 @@ class ExcelExporter:
     ) -> None:
         """Helper to render and format a table of jobs with Excel Table filters."""
         ws.views.sheetView[0].showGridLines = True
-        headers = ["Company Name", "Job Role", "Number of People", "Date Posted / Discovered", "Status"]
+        headers = ["Company Name", "Job Role", "Location", "Number of People", "Posted By", "Date Posted / Discovered", "Status"]
         ws.append(headers)
 
         # Style header row
@@ -69,8 +69,8 @@ class ExcelExporter:
         ws.row_dimensions[1].height = 26
 
         if not records:
-            ws.append([empty_message, "", "", "", ""])
-            ws.merge_cells("A2:E2")
+            ws.append([empty_message, "", "", "", "", "", ""])
+            ws.merge_cells("A2:G2")
             empty_cell = ws.cell(row=2, column=1)
             empty_cell.font = Font(name="Calibri", size=11, italic=True, color="64748B")
             empty_cell.alignment = Alignment(horizontal="center", vertical="center")
@@ -100,42 +100,61 @@ class ExcelExporter:
             if row_fill:
                 c2.fill = row_fill
 
-            # Number of People
+            # Location
             c3 = ws.cell(row=row_idx, column=3)
             c3.font = cls.DATA_FONT
+            c3.alignment = Alignment(horizontal="left", vertical="center")
             c3.border = cls.THIN_BORDER
             if row_fill:
                 c3.fill = row_fill
-            if isinstance(record.number_of_people, (int, float)):
-                c3.alignment = Alignment(horizontal="right", vertical="center")
-                c3.number_format = "#,##0"
-            elif str(record.number_of_people) == "N/A":
-                c3.alignment = Alignment(horizontal="center", vertical="center")
-            else:
-                c3.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Date Posted / Discovered
+            # Number of People
             c4 = ws.cell(row=row_idx, column=4)
             c4.font = cls.DATA_FONT
-            c4.alignment = Alignment(horizontal="center", vertical="center")
             c4.border = cls.THIN_BORDER
             if row_fill:
                 c4.fill = row_fill
+            if isinstance(record.number_of_people, (int, float)):
+                c4.alignment = Alignment(horizontal="right", vertical="center")
+                c4.number_format = "#,##0"
+            elif str(record.number_of_people) == "N/A":
+                c4.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                c4.alignment = Alignment(horizontal="left", vertical="center")
+
+            # Posted By (Recruiter)
+            c5 = ws.cell(row=row_idx, column=5)
+            c5.font = cls.DATA_FONT
+            c5.border = cls.THIN_BORDER
+            if row_fill:
+                c5.fill = row_fill
+            if str(record.posted_by) == "N/A":
+                c5.alignment = Alignment(horizontal="center", vertical="center")
+            else:
+                c5.alignment = Alignment(horizontal="left", vertical="center")
+
+            # Date Posted / Discovered
+            c6 = ws.cell(row=row_idx, column=6)
+            c6.font = cls.DATA_FONT
+            c6.alignment = Alignment(horizontal="center", vertical="center")
+            c6.border = cls.THIN_BORDER
+            if row_fill:
+                c6.fill = row_fill
 
             # Status (NEW vs EXISTING)
-            c5 = ws.cell(row=row_idx, column=5)
-            c5.border = cls.THIN_BORDER
-            c5.alignment = Alignment(horizontal="center", vertical="center")
+            c7 = ws.cell(row=row_idx, column=7)
+            c7.border = cls.THIN_BORDER
+            c7.alignment = Alignment(horizontal="center", vertical="center")
             if record.is_new:
-                c5.font = cls.NEW_STATUS_FONT
-                c5.fill = cls.NEW_STATUS_FILL
+                c7.font = cls.NEW_STATUS_FONT
+                c7.fill = cls.NEW_STATUS_FILL
             else:
-                c5.font = cls.EXISTING_STATUS_FONT
+                c7.font = cls.EXISTING_STATUS_FONT
 
         # Setup Table with native Excel filters
         end_row = max(len(records) + 1, 2)
         safe_table_name = re.sub(r"[^A-Za-z0-9_]", "_", table_name)
-        tab = Table(displayName=safe_table_name, ref=f"A1:E{end_row}")
+        tab = Table(displayName=safe_table_name, ref=f"A1:G{end_row}")
         tab.tableStyleInfo = TableStyleInfo(
             name="TableStyleLight1",
             showFirstColumn=False,
@@ -146,12 +165,12 @@ class ExcelExporter:
         try:
             ws.add_table(tab)
         except Exception:
-            ws.auto_filter.ref = f"A1:E{end_row}"
+            ws.auto_filter.ref = f"A1:G{end_row}"
 
         ws.freeze_panes = "A2"
 
         # Auto-size columns
-        min_widths = {"A": 28, "B": 32, "C": 22, "D": 24, "E": 14}
+        min_widths = {"A": 28, "B": 32, "C": 22, "D": 22, "E": 34, "F": 24, "G": 14}
         for col in ws.columns:
             col_letter = get_column_letter(col[0].column)
             max_len = 0

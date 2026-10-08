@@ -393,32 +393,47 @@ class JobCrawler:
             return (slug, "N/A")
 
         target_desc = f"'{search_query}' jobs" if search_query else "jobs"
+        current_search_page = 1
+        if search_query and offset > 0:
+            current_search_page = max(1, (offset // 20) + 1)
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             while not self._is_stopped and len(processed_records) < max_records:
-                page_offsets = [offset + (index * limit) for index in range(parallel_pages)]
-                page_num += len(page_offsets)
-                self.stats.pages_processed = page_num
-                self.stats.current_action = (
-                    f"Streaming {target_desc} from Himalayas API (Offsets: {offset}-{page_offsets[-1]})..."
-                )
+                if search_query:
+                    page_items = [current_search_page + index for index in range(parallel_pages)]
+                    page_num += len(page_items)
+                    self.stats.pages_processed = page_num
+                    self.stats.current_action = (
+                        f"Streaming {target_desc} from Himalayas API (Pages: {page_items[0]}-{page_items[-1]})..."
+                    )
+                    req_urls = [
+                        (p, f"https://himalayas.app/jobs/api/search?q={quote(search_query)}&page={p}")
+                        for p in page_items
+                    ]
+                else:
+                    page_offsets = [offset + (index * limit) for index in range(parallel_pages)]
+                    page_num += len(page_offsets)
+                    self.stats.pages_processed = page_num
+                    self.stats.current_action = (
+                        f"Streaming {target_desc} from Himalayas API (Offsets: {offset}-{page_offsets[-1]})..."
+                    )
+                    req_urls = [
+                        (p_off, f"https://himalayas.app/jobs/api?offset={p_off}&limit={limit}")
+                        for p_off in page_offsets
+                    ]
+
                 if on_progress:
                     await on_progress(self.stats)
 
                 try:
-                    def _build_api_url(page_off: int) -> str:
-                        if search_query:
-                            return f"https://himalayas.app/jobs/api/search?q={quote(search_query)}&offset={page_off}&limit={limit}"
-                        return f"https://himalayas.app/jobs/api?offset={page_off}&limit={limit}"
-
                     while True:
                         responses = await asyncio.gather(
                             *(
                                 client.get(
-                                    _build_api_url(page_offset),
+                                    u,
                                     headers={"User-Agent": "Mozilla/5.0"},
                                 )
-                                for page_offset in page_offsets
+                                for _, u in req_urls
                             )
                         )
                         rate_limited = [response for response in responses if response.status_code == 429]
@@ -450,12 +465,12 @@ class JobCrawler:
                             break
 
                     raw_jobs = []
-                    for page_offset, resp in zip(page_offsets, responses):
+                    for (p_id, _), resp in zip(req_urls, responses):
                         if resp.status_code != 200:
                             logger.warning(
-                                "Himalayas API returned status %s at offset %d",
+                                "Himalayas API returned status %s for page/offset %s",
                                 resp.status_code,
-                                page_offset,
+                                p_id,
                             )
                             continue
                         data = resp.json()
@@ -468,8 +483,11 @@ class JobCrawler:
                         logger.info("No further jobs returned from Himalayas API.")
                         break
 
-                    if total_api_count is not None and offset >= total_api_count:
-                        logger.info("Offset %d reached total reported count %d. Completing search crawl.", offset, total_api_count)
+                    if search_query and total_api_count is not None and (current_search_page - 1) * 20 >= total_api_count:
+                        logger.info("Reached reported search total %d. Completing search crawl.", total_api_count)
+                        break
+                    elif not search_query and total_api_count is not None and offset >= total_api_count:
+                        logger.info("Offset %d reached total reported count %d. Completing feed crawl.", offset, total_api_count)
                         break
 
                     # Extract all cards
@@ -523,6 +541,9 @@ class JobCrawler:
                         else:
                             posted_date = "Unknown"
 
+                        loc_restrictions = j.get("locationRestrictions") or []
+                        loc_val = ", ".join(str(x) for x in loc_restrictions) if loc_restrictions else "Remote"
+
                         if DataValidator.is_valid_record(clean_company, clean_role, emp_count):
                             db_id, is_new, first_seen_at = self.repository.register_job(
                                 company_name=clean_company,
@@ -532,6 +553,8 @@ class JobCrawler:
                                 source_website="himalayas.app",
                                 posted_date=posted_date,
                                 published_at=pub_date_raw,
+                                location=loc_val,
+                                posted_by="N/A",
                             )
                             if is_new:
                                 self.stats.new_jobs_added += 1
@@ -546,6 +569,8 @@ class JobCrawler:
                                 is_new=is_new,
                                 db_id=db_id,
                                 posted_date=posted_date,
+                                location=loc_val,
+                                posted_by="N/A",
                             )
                             processed_records.append(rec)
                             self.processed_records = processed_records
@@ -557,7 +582,10 @@ class JobCrawler:
                                 unique_companies.add(norm_comp)
                                 self.stats.companies_discovered = len(unique_companies)
 
-                    offset += len(raw_jobs)
+                    if search_query:
+                        current_search_page += len(page_items)
+                    else:
+                        offset += len(raw_jobs)
                     if on_progress:
                         await on_progress(self.stats)
 
@@ -639,6 +667,9 @@ class JobCrawler:
 
         offset = 0
         total_target_jobs: Optional[int] = None
+        consecutive_existing = 0
+        MAX_CONSECUTIVE_EXISTING = 40
+        stop_early = False
 
         async with httpx.AsyncClient(timeout=25.0, headers=get_headers(0)) as client:
             while not self._is_stopped and len(processed_records) < max_records:
@@ -776,7 +807,87 @@ class JobCrawler:
                     if not is_eligible_company_size(emp_count):
                         continue
 
+                    # Extract location (Bangalore, Pune, Hyderabad, Work From Home, etc.)
+                    loc_val = "N/A"
+                    for k in ("locations", "location", "city", "cities", "job_locations"):
+                        val = obj.get(k)
+                        if val:
+                            if isinstance(val, list) and val:
+                                l_items = [
+                                    str(x.get("city") or x.get("name") if isinstance(x, dict) else x).strip()
+                                    for x in val if x
+                                ]
+                                if l_items:
+                                    loc_val = ", ".join(l_items)
+                                    break
+                            elif isinstance(val, str) and val.strip() and val.strip().lower() != "n/a":
+                                loc_val = val.strip()
+                                break
+                    if loc_val == "N/A" and employer:
+                        for k in ("locations", "location", "city"):
+                            val = employer.get(k)
+                            if val:
+                                if isinstance(val, list) and val:
+                                    loc_val = ", ".join(str(x).strip() for x in val if str(x).strip())
+                                    break
+                                elif isinstance(val, str) and val.strip():
+                                    loc_val = val.strip()
+                                    break
+                    if (not loc_val or loc_val == "N/A") and job_url:
+                        clean_u = job_url.split("?")[0].rstrip("/").lower()
+                        slug_u = clean_u.split("/")[-1]
+                        known_cities = {
+                            "bangalore": "Bangalore", "bengaluru": "Bangalore",
+                            "pune": "Pune", "hyderabad": "Hyderabad",
+                            "mumbai": "Mumbai", "chennai": "Chennai",
+                            "delhi-ncr": "Delhi NCR", "delhi": "Delhi", "new-delhi": "New Delhi",
+                            "gurgaon": "Gurgaon", "gurugram": "Gurgaon",
+                            "noida": "Noida", "greater-noida": "Greater Noida",
+                            "work-from-home": "Work From Home", "remote": "Remote",
+                            "kolkata": "Kolkata", "ahmedabad": "Ahmedabad",
+                            "kochi": "Kochi", "coimbatore": "Coimbatore",
+                            "jaipur": "Jaipur", "indore": "Indore", "chandigarh": "Chandigarh",
+                        }
+                        for k, v in sorted(known_cities.items(), key=lambda x: -len(x[0])):
+                            if slug_u.endswith(f"-{k}") or slug_u.endswith(f"_{k}"):
+                                loc_val = v
+                                break
+                        if loc_val == "N/A":
+                            m_loc = re.search(r"-at-[a-z0-9\-]+-([a-z\-]+)$", slug_u)
+                            if m_loc:
+                                cand_loc = m_loc.group(1).replace("-", " ").strip().title()
+                                if cand_loc and not cand_loc.isdigit() and len(cand_loc) > 2:
+                                    loc_val = cand_loc
+
                     if DataValidator.is_valid_record(clean_comp, clean_role, emp_count):
+                        # Extract recruiter / Posted By information
+                        posted_by_val = "N/A"
+                        job_id_num = obj.get("id")
+                        if not job_id_num and job_url:
+                            m_jid = re.search(r"job-(\d+)-", job_url)
+                            if m_jid:
+                                job_id_num = m_jid.group(1)
+
+                        if job_id_num:
+                            try:
+                                r_rec = await client.get(
+                                    f"https://www.instahyre.com/api/v1/employer_public_jobs/{job_id_num}",
+                                    headers=get_headers(page_num),
+                                    timeout=6.0,
+                                )
+                                if r_rec.status_code == 200:
+                                    rec_data = r_rec.json()
+                                    r_name = str(rec_data.get("recruiter_name") or "").strip()
+                                    r_desig = str(rec_data.get("recruiter_designation") or "").strip()
+                                    r_comp = str(rec_data.get("recruiter_company_name") or "").strip()
+                                    r_parts = [p for p in (r_desig, r_comp) if p]
+                                    if r_name and r_parts:
+                                        posted_by_val = f"{r_name} ({', '.join(r_parts)})"
+                                    elif r_name:
+                                        posted_by_val = r_name
+                            except Exception:
+                                pass
+
                         db_id, is_new, first_seen_at = self.repository.register_job(
                             company_name=clean_comp,
                             job_role=clean_role,
@@ -784,11 +895,21 @@ class JobCrawler:
                             job_url=job_url,
                             source_website="instahyre.com",
                             posted_date=source_posted_date,
+                            location=loc_val,
+                            posted_by=posted_by_val,
                         )
                         if is_new:
                             self.stats.new_jobs_added += 1
+                            consecutive_existing = 0
                         else:
                             self.stats.existing_jobs_seen += 1
+                            consecutive_existing += 1
+                            if consecutive_existing >= MAX_CONSECUTIVE_EXISTING:
+                                logger.info(
+                                    "Consecutive existing jobs threshold (%d) reached. Stopping incremental scrape early.",
+                                    consecutive_existing,
+                                )
+                                stop_early = True
 
                         r = ProcessedJobRecord(
                             company_name=clean_comp,
@@ -798,6 +919,8 @@ class JobCrawler:
                             is_new=is_new,
                             db_id=db_id,
                             posted_date=source_posted_date or iso_str_to_age_label(first_seen_at),
+                            location=loc_val,
+                            posted_by=posted_by_val,
                         )
                         processed_records.append(r)
                         self.processed_records = processed_records
@@ -811,9 +934,16 @@ class JobCrawler:
                             unique_companies.add(norm_comp)
                             self.stats.companies_discovered = len(unique_companies)
 
+                        if stop_early:
+                            break
+
                 offset += len(objs)
                 if on_progress:
                     await on_progress(self.stats)
+
+                if stop_early:
+                    logger.info("Incremental scraping completed: reached known historical job boundary.")
+                    break
 
                 # Check if next URL exists in meta
                 meta_next = meta.get("next")

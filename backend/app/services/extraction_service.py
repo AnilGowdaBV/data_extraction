@@ -192,6 +192,28 @@ class ExtractionService:
                         len(final_records),
                         excel_path,
                     )
+
+                    # Automatically sync to Google Sheets (current date tab - only brand-new jobs)
+                    try:
+                        from backend.app.exporters.google_sheets import GoogleSheetsExporter
+                        new_only_records = [r for r in final_records if getattr(r, "is_new", False)]
+                        if new_only_records:
+                            session.stats.current_action = f"Syncing {len(new_only_records)} new jobs to Google Sheet..."
+                            await self._emit_progress(session, session.stats)
+                            gs_res = await GoogleSheetsExporter.sync_jobs_to_sheet(new_only_records)
+                            if gs_res.get("success"):
+                                logger.info(
+                                    "Successfully auto-synced %d new jobs to Google Sheet tab '%s'",
+                                    gs_res.get("synced_count", 0),
+                                    gs_res.get("sheet_name", ""),
+                                )
+                                session.stats.current_action = f"Extraction complete! Synced {len(new_only_records)} new jobs to Google Sheet tab '{gs_res.get('sheet_name', '')}'."
+                        else:
+                            logger.info("Extraction finished. No new jobs found to sync (all %d were already existing).", len(final_records))
+                            session.stats.current_action = f"Extraction complete! All {len(final_records)} scanned jobs were already in database."
+                    except Exception as gs_err:
+                        logger.warning("Google Sheet auto-sync encountered an issue (non-fatal): %s", gs_err)
+
                 except Exception as export_err:
                     logger.error("Failed to generate Excel for job %s: %s", session.job_id, export_err, exc_info=True)
 

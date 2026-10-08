@@ -132,7 +132,8 @@ async def export_category_database(
     export_dir = os.path.join(tempfile.gettempdir(), "category_database_exports")
     os.makedirs(export_dir, exist_ok=True)
 
-    filename = cat_info["filename"]
+    prefix = f"{source.capitalize()}_" if source and source.lower() != "all" else ""
+    filename = f"{prefix}{cat_info['filename']}"
     output_path = os.path.join(export_dir, filename)
 
     ExcelExporter.export_category_workbook(
@@ -145,5 +146,40 @@ async def export_category_database(
         path=output_path,
         filename=filename,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/sync-google-sheet")
+async def sync_database_to_google_sheet(
+    source: Optional[str] = Query(None, description="Filter source e.g. instahyre, himalayas, or all"),
+    by_date: bool = Query(True, description="Group all jobs by their scraped date tabs"),
+    limit: Optional[int] = Query(None, description="Optional max jobs to sync"),
+) -> dict:
+    """
+    Safely sync jobs directly into the user's Google Spreadsheet.
+    If by_date is True, groups all jobs by their scraped date (e.g. Sep 23, Sep 24, Oct 8)
+    and dumps each group into its own date tab.
+    Existing tabs and data are completely untouched.
+    """
+    src_filter = source if source and source.lower() != "all" else None
+    all_recs = repository.get_all_jobs(source_website=src_filter)
+    if not all_recs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No job records found to sync.",
+        )
+
+    if limit and limit > 0:
+        all_recs = all_recs[:limit]
+
+    from backend.app.exporters.google_sheets import GoogleSheetsExporter
+    if by_date:
+        res = await GoogleSheetsExporter.sync_all_jobs_by_date(all_recs)
+    else:
+        new_today = [r for r in all_recs if r.is_new]
+        recs_to_sync = new_today if new_today else all_recs
+        res = await GoogleSheetsExporter.sync_jobs_to_sheet(recs_to_sync)
+
+    return res
 

@@ -45,6 +45,8 @@ class JobRepository:
         source_website: Optional[str] = None,
         posted_date: Optional[str] = None,
         published_at: Optional[Any] = None,
+        location: Optional[str] = "N/A",
+        posted_by: Optional[str] = "N/A",
     ) -> Tuple[int, bool, str]:
         """
         Check if the job has been previously recorded:
@@ -54,6 +56,8 @@ class JobRepository:
         """
         fingerprint = self.compute_fingerprint(company_name, job_role, job_url)
         str_people = str(number_of_people)
+        clean_loc = str(location).strip() if location else "N/A"
+        clean_posted_by = str(posted_by).strip() if posted_by else "N/A"
 
         # Standardize published_at to ISO string format (YYYY-MM-DD HH:MM:SS)
         norm_published_at = None
@@ -93,12 +97,25 @@ class JobRepository:
                             WHEN ? != 'N/A' AND ? != '' THEN ?
                             ELSE number_of_people
                         END,
+                        location = CASE
+                            WHEN ? != 'N/A' AND ? != '' THEN ?
+                            ELSE location
+                        END,
+                        posted_by = CASE
+                            WHEN ? != 'N/A' AND ? != '' THEN ?
+                            ELSE posted_by
+                        END,
                         job_url = COALESCE(?, job_url),
                         posted_date = COALESCE(?, posted_date),
                         published_at = COALESCE(?, published_at)
                     WHERE id = ?;
                     """,
-                    (str_people, str_people, str_people, job_url, posted_date, norm_published_at, job_id),
+                    (
+                        str_people, str_people, str_people,
+                        clean_loc, clean_loc, clean_loc,
+                        clean_posted_by, clean_posted_by, clean_posted_by,
+                        job_url, posted_date, norm_published_at, job_id,
+                    ),
                 )
                 conn.commit()
                 return job_id, False, str(first_seen_at)
@@ -108,8 +125,8 @@ class JobRepository:
                     INSERT INTO scraped_jobs (
                         fingerprint, job_url, company_name, job_role,
                         number_of_people, source_website, posted_date, published_at,
-                        first_seen_at, last_seen_at, scrape_count
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1);
+                        location, posted_by, first_seen_at, last_seen_at, scrape_count
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1);
                     """,
                     (
                         fingerprint,
@@ -120,6 +137,8 @@ class JobRepository:
                         source_website,
                         posted_date,
                         norm_published_at,
+                        clean_loc,
+                        clean_posted_by,
                     ),
                 )
                 conn.commit()
@@ -225,7 +244,7 @@ class JobRepository:
             cursor = conn.cursor()
             query = """
                 SELECT id, company_name, job_role, number_of_people, job_url, first_seen_at,
-                       posted_date, published_at
+                       posted_date, published_at, location, posted_by
                 FROM scraped_jobs
             """
             params: list[Any] = []
@@ -280,6 +299,9 @@ class JobRepository:
                     # Fallback to first_seen_at using accurate relative days
                     p_date = iso_to_himalayas_age(str(row["first_seen_at"]))
 
+                loc_val = row["location"] if "location" in row.keys() and row["location"] else "N/A"
+                posted_by_val = row["posted_by"] if "posted_by" in row.keys() and row["posted_by"] else "N/A"
+
                 records.append(
                     ProcessedJobRecord(
                         company_name=row["company_name"],
@@ -289,6 +311,9 @@ class JobRepository:
                         is_new=_is_new(row["first_seen_at"]),
                         db_id=row["id"],
                         posted_date=p_date,
+                        location=loc_val,
+                        posted_by=posted_by_val,
+                        first_seen_at=str(row["first_seen_at"]) if row["first_seen_at"] else None,
                     )
                 )
             return records
